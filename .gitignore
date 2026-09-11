@@ -1,0 +1,9 @@
+# Ignore all data files
+stats/*.csv
+stats/*.parquet
+
+# Ignore Python cache
+__pycache__/
+
+# Ignore virtual environment
+venv/
