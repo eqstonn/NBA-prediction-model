@@ -22,3 +22,19 @@ A probabilistic NBA prediction model that evaluates team strength using Bayesian
 * **Autoregressive Time-Decay:** Giving more mathematical weight to recent games and win streaks.
 * **Dynamic Pace Distributions:** Team-specific possession curves to accurately project final scores.
 * **Home-Court Advantage:** Algorithmic adjustments to team baselines based on the venue.
+
+## Predictions Website
+
+Builds a simple web page with the model's picks for this week's games.
+
+```bash
+pip install -r requirements.txt
+python code/build_site.py            # today + the next 6 days
+open site/index.html                 # or just double-click it
+```
+
+* **Schedule:** pulled from NBA.com's free public schedule (falls back to ESPN's public scoreboard). No API key needed.
+* **Predictions:** each game runs `simulate_factors` from `code/simulation.py` (10,000 sims) using `priors.json`.
+* **Swapping in a retrained model:** overwrite `priors.json`, or run `python code/build_site.py --priors path/to/new_priors.json`. The website only talks to the model through `code/predict.py`, so if the model's interface changes, that's the only file to update.
+* Finished games show the final score and whether the model's pick was right. `site/predictions.json` has the same data as JSON.
+* Options: `--start YYYY-MM-DD` and `--days N` to pick a different window.
