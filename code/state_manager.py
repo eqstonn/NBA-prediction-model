@@ -28,7 +28,7 @@ def initialize_priors(team_ids):
             }
         }
 
-    with open("priors.json", 'w') as file:
+    with open("priors.json", 'w', encoding="utf-8") as file:
         json.dump(priors, file, indent = 4)
 
 if __name__ == "__main__":

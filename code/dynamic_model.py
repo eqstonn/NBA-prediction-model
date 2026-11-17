@@ -8,7 +8,7 @@ os.environ["PYTENSOR_FLAGS"] = "cxx="
 
 def update_priors(file_path):
     #load priors into a variable (dictionary)
-    with open("priors.json", 'r') as file:
+    with open("priors.json", 'r', encoding="utf-8") as file:
         current_priors = json.load(file)
 
     #data frame with 4 factors for every game
@@ -112,12 +112,12 @@ def update_priors(file_path):
 
         #update every 50
         if count % 50 == 0:
-            with open("priors.json", "w") as file:
+            with open("priors.json", "w", encoding="utf-8") as file:
                 json.dump(current_priors, file, indent=4)
             print(f"Checkpoint: Saved game {count}...")
 
     #update priors json with new stats at very end
-    with open("priors.json", "w") as file:
+    with open("priors.json", "w", encoding="utf-8") as file:
         json.dump(current_priors, file, indent = 4)
 
 if __name__ == "__main__":
