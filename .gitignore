@@ -1,8 +1,9 @@
 # Ignore all data files
 stats/
 
-# Ignore Python cache
+# Ignore Python / pytest cache
 __pycache__/
+.pytest_cache/
 
 # Ignore virtual environment
 venv/

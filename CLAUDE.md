@@ -29,9 +29,13 @@ python code/build_site.py --priors other_priors.json     # or set $env:NBA_PRIOR
 python code/simulation.py                                # quick CLI sim of 3 hard-coded matchups
 python code/dynamic_model.py                             # TRAINING: updates priors.json in place (slow, see below)
 python code/state_manager.py                             # DESTRUCTIVE: resets priors.json to flat league-average defaults
+python code/update.py --start-season                     # new season: priors.json <- frozen snapshot, std 0.1/sqrt(20); clears applied_games.json
+python code/update.py --start-season --n 10              # same, prior worth N=10 games (std 0.1/sqrt(10))
+
+python -m pytest tests                                   # tests (they use a temp folder, never the real priors.json)
 ```
 
-There are no tests, linter, or build step. The repo is not under git yet. `.gitignore` ignores `stats/`, `site/` and `venv/`.
+No linter or build step. The repo is on GitHub (`eqstonn/NBA-prediction-model`). **The user commits and pushes themselves:** make changes, leave them uncommitted, and hand over a commit message. `.gitignore` ignores `stats/`, `site/`, `venv/`, `__pycache__/` and `.pytest_cache/`.
 
 ## Architecture
 
@@ -46,6 +50,10 @@ All code is in `code/` as flat scripts that import each other by bare module nam
   
   It then writes the posterior mean/std back into the dict. It checkpoints to `priors.json` every 50 rows.
 - `state_manager.py` creates the initial `priors.json` with the same default curves for every team.
+
+**In-season path:** `priors_pre_2026-27.json` (frozen) → `update.py` → `priors.json` + `applied_games.json`
+- `update.start_season(n)` reads only the frozen snapshot. For the 30 NBA teams (`schedule.NBA_TEAMS`) it keeps every mean and sets every std to `0.1/sqrt(n)`, so last season counts as `n` games of evidence. The 7 non-NBA teams are copied unchanged. It writes `priors.json` and resets `applied_games.json` to `{}`, which maps `game_id` → info for games already applied.
+- `update.write_json` writes atomically and raises `PermissionError` if pointed at the frozen snapshot. Route all writes through it.
 
 **Prediction path:** `priors.json` → `simulation.py` → `predict.py` → `build_site.py` (+ `schedule.py`)
 - `simulation.simulate_factors(team_a, team_b, priors)` does the following:
