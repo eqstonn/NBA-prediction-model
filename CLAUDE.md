@@ -69,6 +69,7 @@ It has 37 keys: the 30 NBA teams plus a few non-NBA teams from the Kaggle data. 
 
 ## Gotchas
 
+- **`priors_pre_2026-27.json` is a frozen, read-only snapshot** of `priors.json` from before any 2026-27 games were applied (git tag `pretrained-2025-26`). No code may ever write to it. Read it to reset or compare. To restart in-season updates, copy it over `priors.json`, never the other way.
 - **Updates are not idempotent.** Feeding the same game twice moves the priors twice. Any in-season updater must record which games it has already applied. Note that ESPN `game_id`s are ESPN event IDs, not NBA `gameId`s.
 - **Running `dynamic_model.py` as-is would double-count.** Its 3-year window is relative to today and overlaps the games already in `priors.json`. In-season updates must only feed games after the training cutoff.
 - **Posterior stds have collapsed.** Each update narrows std and nothing re-inflates it between games, so trained stds are ~0.005. New games will move the means only slightly unless variance is added back (the time-decay item on the roadmap).

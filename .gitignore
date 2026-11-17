@@ -1,6 +1,5 @@
 # Ignore all data files
-stats/*.csv
-stats/*.parquet
+stats/
 
 # Ignore Python cache
 __pycache__/
