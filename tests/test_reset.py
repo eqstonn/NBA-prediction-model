@@ -4,7 +4,8 @@ Tests for the season reset in code/update.py.
 Run from the repo root:  python -m pytest tests
 
 priors.json and applied_games.json are redirected to a temp folder, so the real
-ones are never touched. The real frozen snapshot is read (never written).
+ones are never touched. The real preseason files (the live one, --start-season's default
+source, and the frozen snapshot) are read, never written.
 """
 import hashlib
 import json
@@ -21,6 +22,7 @@ import update  # noqa: E402
 from schedule import NBA_TEAMS  # noqa: E402
 
 FROZEN = REPO_ROOT / "priors_pre_2026-27.json"
+SOURCE = REPO_ROOT / "priors_pre_2026-27_pace-home.json"   # --start-season's default source
 
 
 def sha256(path):
@@ -44,6 +46,15 @@ def frozen():
 
 
 @pytest.fixture
+def source():
+    return load(SOURCE)
+
+
+def test_default_source_is_the_live_preseason_file():
+    assert update.START_PRIORS_PATH == SOURCE
+
+
+@pytest.fixture
 def out(tmp_path, monkeypatch):
     """Point priors.json / applied_games.json at a temp folder, pre-filled with junk."""
     priors = tmp_path / "priors.json"
@@ -55,11 +66,13 @@ def out(tmp_path, monkeypatch):
     return priors, applied
 
 
-def test_means_unchanged(out, frozen):
+def test_means_unchanged(out, source):
     update.start_season()
     priors = load(out[0])
     for team_id, side, factor, curve in all_curves(priors, NBA_TEAMS):
-        assert curve["mean"] == frozen[team_id][side][factor]["mean"], (team_id, side, factor)
+        assert curve["mean"] == source[team_id][side][factor]["mean"], (team_id, side, factor)
+    for team_id in NBA_TEAMS:
+        assert priors[team_id]["pace"]["mean"] == source[team_id]["pace"]["mean"]
 
 
 def test_std_default_n20(out):
@@ -70,28 +83,51 @@ def test_std_default_n20(out):
         assert curve["std"] == pytest.approx(0.02236, abs=1e-5)
 
 
-def test_non_nba_teams_identical_to_frozen(out, frozen):
+def test_non_nba_teams_identical_to_the_source(out, source):
     update.start_season()
     priors = load(out[0])
-    non_nba = [team_id for team_id in frozen if team_id not in NBA_TEAMS]
+    non_nba = [team_id for team_id in source if team_id not in NBA_TEAMS]
     assert len(non_nba) == 7
     for team_id in non_nba:
-        assert priors[team_id] == frozen[team_id], team_id
-    assert set(priors) == set(frozen)
+        assert priors[team_id] == source[team_id], team_id
+    assert set(priors) == set(source)
 
 
-def test_frozen_file_hash_unchanged(out):
-    before = sha256(FROZEN)
+def test_reset_from_the_frozen_snapshot(out, frozen):
+    """--from the frozen snapshot (no team paces) needs --pace off; the result keeps its means."""
+    before = (out[0].read_bytes(), out[1].read_bytes())
+    with pytest.raises(ValueError, match="pace"):
+        update.start_season(from_path=FROZEN)
+    with pytest.raises(SystemExit):
+        update.main(["--start-season", "--from", str(FROZEN)])
+    assert (out[0].read_bytes(), out[1].read_bytes()) == before      # refused before writing anything
+    update.main(["--start-season", "--from", str(FROZEN), "--pace", "off"])
+    priors = load(out[0])
+    for team_id, side, factor, curve in all_curves(priors, NBA_TEAMS):
+        assert curve["mean"] == frozen[team_id][side][factor]["mean"]
+        assert curve["std"] == pytest.approx(0.1 / math.sqrt(20))
+    assert load(out[1]) == {}
+
+
+def test_source_files_hash_unchanged(out):
+    before = (sha256(FROZEN), sha256(SOURCE))
     update.start_season()
     update.main(["--start-season", "--n", "10"])
-    assert sha256(FROZEN) == before
+    update.main(["--start-season", "--from", str(FROZEN), "--pace", "off"])
+    assert (sha256(FROZEN), sha256(SOURCE)) == before
 
 
-def test_writing_frozen_file_is_refused(frozen):
-    before = sha256(FROZEN)
+@pytest.mark.parametrize("path", [FROZEN, SOURCE])
+def test_writing_a_preseason_file_is_refused(path):
+    before = sha256(path)
     with pytest.raises(PermissionError):
-        update.write_json(FROZEN, {})
-    assert sha256(FROZEN) == before
+        update.write_json(path, {})
+    assert sha256(path) == before
+
+
+def test_from_needs_replay_or_start_season(out):
+    with pytest.raises(SystemExit):
+        update.main(["--update", "--from", str(SOURCE)])
 
 
 def test_cli_n10(out):

@@ -4,18 +4,22 @@ Monte Carlo simulation of one game from two teams' curves (10,000 draws).
 Per draw:
   1. each side's matchup expectation per factor: (team offense + opponent defense) / 2, with
      the offense and defense values drawn from their curves (rating uncertainty)
-  2. game noise on top, sigma_f per factor (params.sim_sigma(): legacy by default)
+  2. game noise on top, sigma_f per factor (params.sim_sigma(): fitted by default)
        sim_corr "off" (default)  every one of the 8 game factors gets independent noise
        sim_corr "on"             the 8 noises are drawn jointly with model_params.json's
                                  factor correlation (both teams, both sides of the ball)
   3. points from the four factors
-       pace "off" (default)  100 possessions and the original formula
+       pace "off"            100 possessions and the original formula
                              possessions (1 - TOV)(1 + ORB (1 - eFG)) (2 eFG + 0.77 FTR):
                              ~22 points per game too high (it ignores free-throw possessions)
-       pace "on"             possessions ~ N((pace_a + pace_b) / 2, sigma_pace^2) with each
+       pace "on" (default)   possessions ~ N((pace_a + pace_b) / 2, sigma_pace^2) with each
                              team's pace drawn from its curve, and the corrected formula
                              points() (constants from model_params.json["points"])
-Both off = the original simulation, draw for draw (same seed, same numbers).
+Both off (with legacy sigma and home off) = the original simulation, draw for draw.
+
+home "on" (Phase 8, default): team_a is the home team; the home boost (model_params.json["home"]) is
+added to each side's matchup expectation in step 1, except at neutral sites. "off" adds
+nothing, so the draws are the same numbers as before.
 """
 import json
 
@@ -40,22 +44,28 @@ def _draw_curves(rng, curves: dict, n: int) -> dict:
     return {f: rng.normal(loc=curves[f]["mean"], scale=curves[f]["std"], size=n) for f in FACTORS}
 
 
-def independent_factors(rng, a: dict, b: dict, sigma: dict, n: int = N_SIM):
+def _expected(o, d, offset, f):
+    """Matchup expectation (o + d)/2, plus the home-court offset when there is one (None: nothing added)."""
+    return (o[f] + d[f]) / 2 if offset is None else (o[f] + d[f]) / 2 + offset[f]
+
+
+def independent_factors(rng, a: dict, b: dict, sigma: dict, n: int = N_SIM, offset_a=None, offset_b=None):
     """
     The original draws, in the original order: A's offense, B's defense, A's game factors
     (independent noise), then B's offense, A's defense, B's game factors.
     Returns ({factor: A's values}, {factor: B's values}); A's are A's offensive line.
+    offset_a / offset_b: {factor: shift} added to A's / B's expected line (home court), or None.
     """
     a_o = _draw_curves(rng, a["offense"], n)
     b_d = _draw_curves(rng, b["defense"], n)
-    a_game = {f: rng.normal(loc=(a_o[f] + b_d[f]) / 2, scale=sigma[f], size=n) for f in FACTORS}
+    a_game = {f: rng.normal(loc=_expected(a_o, b_d, offset_a, f), scale=sigma[f], size=n) for f in FACTORS}
     b_o = _draw_curves(rng, b["offense"], n)
     a_d = _draw_curves(rng, a["defense"], n)
-    b_game = {f: rng.normal(loc=(b_o[f] + a_d[f]) / 2, scale=sigma[f], size=n) for f in FACTORS}
+    b_game = {f: rng.normal(loc=_expected(b_o, a_d, offset_b, f), scale=sigma[f], size=n) for f in FACTORS}
     return a_game, b_game
 
 
-def correlated_factors(rng, a: dict, b: dict, sigma: dict, corr, n: int = N_SIM):
+def correlated_factors(rng, a: dict, b: dict, sigma: dict, corr, n: int = N_SIM, offset_a=None, offset_b=None):
     """
     Like independent_factors, but the 8 game noises (A's eFG/TOV/ORB/FTR, then B's; the
     order of params.CORR_LABELS) are one multivariate normal draw: sigma_f * (L z), L the
@@ -68,8 +78,8 @@ def correlated_factors(rng, a: dict, b: dict, sigma: dict, corr, n: int = N_SIM)
     chol = np.linalg.cholesky(np.asarray(corr, dtype=float))
     z = chol @ rng.standard_normal((len(params.CORR_LABELS), n))
     k = len(FACTORS)
-    a_game = {f: (a_o[f] + b_d[f]) / 2 + sigma[f] * z[i] for i, f in enumerate(FACTORS)}
-    b_game = {f: (b_o[f] + a_d[f]) / 2 + sigma[f] * z[k + i] for i, f in enumerate(FACTORS)}
+    a_game = {f: _expected(a_o, b_d, offset_a, f) + sigma[f] * z[i] for i, f in enumerate(FACTORS)}
+    b_game = {f: _expected(b_o, a_d, offset_b, f) + sigma[f] * z[k + i] for i, f in enumerate(FACTORS)}
     return a_game, b_game
 
 
@@ -100,17 +110,21 @@ def points(g: dict, possessions, constants=None):
 
 
 def simulate_factors(team_a, team_b, data: dict, seed=None, sigma=None,
-                     sim_corr: str = params.DEFAULT_SIM_CORR_MODE, pace: str = params.DEFAULT_PACE_MODE):
+                     sim_corr: str = params.DEFAULT_SIM_CORR_MODE, pace: str = params.DEFAULT_PACE_MODE,
+                     home: str = params.DEFAULT_HOME_MODE, neutral: bool = False):
     """
     Simulate team_a vs team_b from the curves in `data` (priors). seed=None: fresh randomness
     (website); an int: reproducible (prediction log). sigma: {factor: game noise}, default
-    params.sim_sigma() (legacy). sim_corr / pace: "on" or "off" (see the module docstring).
+    params.sim_sigma() (fitted). sim_corr / pace: "on" or "off" (see the module docstring).
+    home "on": team_a is the home team; its offensive line gets the home boost's "offense"
+    shifts and team_b's line the "defense" shifts (params.home_offsets), unless neutral=True.
     """
     n_sim = N_SIM
     rng = np.random.default_rng(seed)
     sigma = params.check_sigma(sigma) if sigma is not None else params.sim_sigma()
     corr = params.sim_corr(sim_corr)
     with_pace = params.is_on(pace, "pace")
+    offset_a, offset_b = params.home_offsets(home, neutral)
     a, b = data[team_a], data[team_b]
     if with_pace:
         for team, curves in ((team_a, a), (team_b, b)):
@@ -118,9 +132,9 @@ def simulate_factors(team_a, team_b, data: dict, seed=None, sigma=None,
                 raise KeyError(f"team {team} has no pace curve; use priors trained with --pace on")
 
     if corr is None:
-        a_game, b_game = independent_factors(rng, a, b, sigma, n_sim)
+        a_game, b_game = independent_factors(rng, a, b, sigma, n_sim, offset_a, offset_b)
     else:
-        a_game, b_game = correlated_factors(rng, a, b, sigma, corr, n_sim)
+        a_game, b_game = correlated_factors(rng, a, b, sigma, corr, n_sim, offset_a, offset_b)
 
     if with_pace:
         possessions = draw_possessions(rng, a, b, params.pace_sigma(), n_sim)

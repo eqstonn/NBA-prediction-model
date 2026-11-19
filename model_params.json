@@ -191,5 +191,81 @@
             "mean_squared_standardized_residual": 0.997,
             "fitted": "2026-11-18"
         }
+    },
+    "home": {
+        "offense": {
+            "eFG": 0.0043,
+            "TOV": -0.0008,
+            "ORB": 0.00115,
+            "FTR": 0.0026
+        },
+        "defense": {
+            "eFG": -0.0043,
+            "TOV": 0.0008,
+            "ORB": -0.00115,
+            "FTR": -0.0026
+        },
+        "fit": {
+            "method": "per-factor gap delta = offense - defense maximizing the one-step-ahead (prequential) predictive log-likelihood of the exact training pass with the boost (flat start, tau=0, fitted sigma); split evenly, offense +delta/2 and defense -delta/2 (only the gap is identifiable; the ratings are neutral-site strength); grid -0.04..0.04 step 0.002, then +-0.002 in steps of 0.0001; SE from the log-likelihood curvature",
+            "data": {
+                "csv": "TeamStatisticsExtended.csv",
+                "before": "2026-10-03",
+                "years": 3,
+                "rows": 7926,
+                "games": 3963,
+                "first": "2023-10-24",
+                "last": "2026-06-13"
+            },
+            "delta": {
+                "eFG": 0.0086,
+                "TOV": -0.0016,
+                "ORB": 0.0023,
+                "FTR": 0.0052
+            },
+            "delta_se": {
+                "eFG": 0.00144,
+                "TOV": 0.00082,
+                "ORB": 0.00162,
+                "FTR": 0.00192
+            },
+            "log_likelihood": {
+                "eFG": 10501.79,
+                "TOV": 14889.16,
+                "ORB": 9514.94,
+                "FTR": 8142.32
+            },
+            "log_likelihood_without_home": {
+                "eFG": 10483.65,
+                "TOV": 14887.2,
+                "ORB": 9513.89,
+                "FTR": 8138.71
+            },
+            "mean_squared_standardized_residual": {
+                "eFG": 0.9902,
+                "TOV": 0.9923,
+                "ORB": 0.999,
+                "FTR": 1.0039
+            },
+            "rows_with_boost": 7882,
+            "neutral_site_games": [
+                "0022300172",
+                "0022300527",
+                "0022301229",
+                "0022301230",
+                "0022400147",
+                "0022400621",
+                "0022400633",
+                "0022401229",
+                "0022401230",
+                "0022500147",
+                "0022500578",
+                "0022500602",
+                "0022501229",
+                "0022501230",
+                "0062500001"
+            ],
+            "pace": "no pace boost: a shift of every home game's possessions is the same thing as a different league pace level (only neutral-site games could tell them apart), see fit_home.py",
+            "fitted": "2026-11-18"
+        }
     }
 }

@@ -1,8 +1,10 @@
 """
 In-season updates to priors.json.
 
-    python code/update.py --start-season          # reset priors for the new season (N=20)
+    python code/update.py --start-season          # reset priors for the new season (N=20) from the live preseason file
     python code/update.py --start-season --n 10   # looser priors: worth 10 games of evidence
+    python code/update.py --start-season --from priors_pre_2026-27.json --pace off
+                                                  # reset from the frozen snapshot (no team paces)
     python code/update.py --update                # apply every finished, not-yet-applied game
     python code/update.py --update --through 2026-11-01 --limit 20   # stop at a date / after 20 games
     python code/update.py --replay --from priors_pre_2026-27.json --out priors_x.json --log log_x.csv
@@ -12,8 +14,10 @@ In-season updates to priors.json.
 
 Season reset
 ------------
-priors_pre_2026-27.json is the frozen snapshot trained on every game before the
-2026-27 season. It is only ever READ here. A reset rebuilds priors.json from it:
+priors_pre_2026-27_pace-home.json is the live model's preseason priors (exact training
+with team paces and the home boost, the defaults). priors_pre_2026-27.json is the frozen
+snapshot of the original training. Both are only ever READ here (write_json refuses them).
+A reset rebuilds priors.json from the first one (or --from):
 
   * NBA teams: every offense/defense factor keeps its mean, but its std is set to
     0.1 / sqrt(N). Training collapsed the stds to ~0.005, which would make this
@@ -58,16 +62,24 @@ spread MAE and Brier score.
 Engines: --engine exact (default) computes each update with the closed-form formula in
 bayes_update.py; --engine pymc samples it with PyMC (fixed seed per game, fit_seed).
 Noise (params.py): --sigma-update fitted|legacy (default fitted: model_params.json) for the
-update and --sigma-sim fitted|legacy (default legacy: 0.05/0.02/0.05/0.02) for the simulation
-behind each logged prediction. Both legacy = the pre-Phase-6 model (reproduces log_exact.csv).
-applied_games.json records the engine and both sigma modes that applied each game.
+update and --sigma-sim fitted|legacy (default fitted; legacy = 0.05/0.02/0.05/0.02) for the
+simulation behind each logged prediction. Both legacy with every switch off = the pre-Phase-6
+model (reproduces log_exact.csv). applied_games.json records the engine and both sigma modes.
 
-Simulation switches (Phase 7, default off; see simulation.py): --sim-corr on draws the game
+Live defaults (params.py): exact engine, both sigmas fitted, --pace on, --sim-corr off,
+--home on. The previous live model is --sigma-sim legacy --pace off --home off.
+
+Simulation switches (Phase 7; see simulation.py): --sim-corr on draws the game
 factors jointly with the fitted correlation; --pace on uses the teams' pace curves for the
 possessions and the corrected points formula. --pace on also UPDATES each team's pace
 after every game (bayes_update.update_pace, tau = 2 sigma_pace / M, possessions from NBA.com's
 advanced box score), and the season reset sets pace stds to 2 sigma_pace / sqrt(N). It needs
 priors with team paces (dynamic_model.py --pace on). applied_games.json records both switches.
+
+Home court (Phase 8, default on): --home on adds model_params.json["home"] to the expected
+value of each line in the update and in the simulation, except at neutral sites (flag from
+NBA.com's schedule, see boxscores.py). Use priors trained with --home on
+(priors_pre_2026-27_pace-home.json). applied_games.json records "home" and "neutral".
 
 --replay rebuilds the season into another file: season reset from --from, then every
 game in applied_games.json oldest first, each predicted + logged into --log before it is
@@ -95,6 +107,7 @@ from schedule import NBA_TEAMS
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FROZEN_PRIORS_PATH = REPO_ROOT / "priors_pre_2026-27.json"  # READ-ONLY, never write
+START_PRIORS_PATH = REPO_ROOT / "priors_pre_2026-27_pace-home.json"   # live preseason priors, READ-ONLY
 PRIORS_PATH = REPO_ROOT / "priors.json"
 APPLIED_GAMES_PATH = REPO_ROOT / "applied_games.json"
 LOG_PATH = REPO_ROOT / "prediction_log.csv"                 # --update's prediction log
@@ -119,10 +132,10 @@ def load_json(path):
 
 
 def write_json(path, data):
-    """Write JSON atomically (temp file + rename). Refuses to touch the frozen snapshot."""
+    """Write JSON atomically (temp file + rename). Refuses to touch the read-only preseason files."""
     path = Path(path)
-    if path.resolve() == FROZEN_PRIORS_PATH.resolve():
-        raise PermissionError(f"{path.name} is the frozen preseason snapshot and must never be written")
+    if any(path.resolve() == p.resolve() for p in (FROZEN_PRIORS_PATH, START_PRIORS_PATH)):
+        raise PermissionError(f"{path.name} is a read-only preseason priors file and must never be written")
     tmp = path.with_name(path.name + ".tmp")
     with open(tmp, "w", encoding="utf-8") as file:
         json.dump(data, file, indent=4)
@@ -168,9 +181,17 @@ def require_pace(priors: dict, what: str) -> None:
                          f"{'...' if len(missing) > 5 else ''}; train priors with dynamic_model.py --pace on")
 
 
-def start_season(n: int = DEFAULT_N) -> dict:
-    """Rebuild priors.json from the frozen snapshot and clear applied_games.json."""
-    priors = reset_priors(load_json(FROZEN_PRIORS_PATH), n)
+def start_season(n: int = DEFAULT_N, from_path=None, pace: str = params.DEFAULT_PACE_MODE) -> dict:
+    """
+    Rebuild priors.json from the preseason priors (default START_PRIORS_PATH, the live
+    model's) and clear applied_games.json. pace="on" (the default) refuses a source without
+    team paces, since --update with --pace on couldn't use the result.
+    """
+    from_path = Path(from_path or START_PRIORS_PATH)
+    source = load_json(from_path)
+    if params.is_on(pace, "pace"):
+        require_pace(source, from_path.name)
+    priors = reset_priors(source, n)
     write_json(PRIORS_PATH, priors)
     write_json(APPLIED_GAMES_PATH, {})
     return priors
@@ -184,23 +205,28 @@ def season_tau(m: int) -> float:
 
 
 def apply_game(priors: dict, game: dict, m: int = DEFAULT_M, random_seed=None, engine: str = DEFAULT_ENGINE,
-               sigma=None, pace: str = params.DEFAULT_PACE_MODE) -> dict:
+               sigma=None, pace: str = params.DEFAULT_PACE_MODE, home: str = params.DEFAULT_HOME_MODE) -> dict:
     """
     Update `priors` in place from one finished game (boxscores.py shape): home offense vs
     away defense, then away offense vs home defense, each widened by tau = 0.1/M first.
     sigma: {factor: game noise}, default the fitted values (params.update_sigma()).
     pace="on": then both teams' pace curves from game["possessions"], widened by
     params.pace_tau(m) first (always the exact formula).
+    home="on": the expected value of each line includes the home boost
+    (params.home_offsets), unless game["neutral"] is True.
     """
     with_pace = params.is_on(pace, "pace")
     if with_pace and "possessions" not in game:
         raise KeyError(f"game {game.get('game_id')}: pace is on but the game has no possessions")
+    if params.is_on(home, "home") and "neutral" not in game:
+        raise KeyError(f"game {game.get('game_id')}: home is on but the game has no neutral-site flag")
+    offsets = dict(zip(("home", "away"), params.home_offsets(home, game.get("neutral", False))))
     tau = season_tau(m)
     for i, (side, other) in enumerate((("home", "away"), ("away", "home"))):
         row = {"team": game[side]["id"], "opponent": game[other]["id"],
                **{f: game[side][f] for f in FACTORS}}
         update_game(priors, row, tau=tau, random_seed=None if random_seed is None else random_seed + i, engine=engine,
-                    sigma=sigma)
+                    sigma=sigma, offset=offsets[side])
     if with_pace:
         update_pace(priors, game["home"]["id"], game["away"]["id"], game["possessions"], tau=params.pace_tau(m))
     return priors
@@ -243,18 +269,21 @@ def load_applied() -> dict:
 def record_game(priors: dict, applied: dict, game: dict, engine: str = DEFAULT_ENGINE,
                 sigma_update: str = params.DEFAULT_UPDATE_SIGMA_MODE,
                 sigma_sim: str = params.DEFAULT_SIM_SIGMA_MODE,
-                sim_corr: str = params.DEFAULT_SIM_CORR_MODE, pace: str = params.DEFAULT_PACE_MODE) -> None:
+                sim_corr: str = params.DEFAULT_SIM_CORR_MODE, pace: str = params.DEFAULT_PACE_MODE,
+                home_mode: str = params.DEFAULT_HOME_MODE) -> None:
     """Save priors.json and record the game in applied_games.json, crash-safely (see module docstring)."""
     home, away = game["home"], game["away"]
     entry = {"date": game["date"],
              "matchup": f"{away['abbr']} @ {home['abbr']}",
              "score": f"{away['pts']}-{home['pts']}",
              "nba_cup": "IST" in game.get("season_types", []),
+             "neutral": bool(game.get("neutral", False)),
              "engine": engine,
              "sigma_update": sigma_update,
              "sigma_sim": sigma_sim,
              "sim_corr": sim_corr,
              "pace": pace,
+             "home": home_mode,
              "pending": priors_fingerprint(priors)}
     applied[game["game_id"]] = entry
     write_json(APPLIED_GAMES_PATH, applied)   # 1. pending, with the fingerprint of the new priors
@@ -269,10 +298,10 @@ def fit_seed(game_id: str) -> int:
 
 
 def log_prediction(priors: dict, game: dict, log_path, sigma=None, sim_corr: str = params.DEFAULT_SIM_CORR_MODE,
-                   pace: str = params.DEFAULT_PACE_MODE) -> None:
+                   pace: str = params.DEFAULT_PACE_MODE, home: str = params.DEFAULT_HOME_MODE) -> None:
     """Predict `game` from `priors` (fixed simulation seed) and append it to the log unless it's already there."""
     prediction = predict_game(game["home"]["id"], game["away"]["id"], priors, seed=predlog.PREDICT_SEED, sigma=sigma,
-                              sim_corr=sim_corr, pace=pace)
+                              sim_corr=sim_corr, pace=pace, home=home, neutral=game.get("neutral", False))
     if prediction is None:
         raise KeyError(f"game {game['game_id']}: a team is missing from the priors")
     predlog.append_rows(log_path, [predlog.make_row(game, prediction)])
@@ -287,19 +316,22 @@ def print_log_metrics(log_path) -> dict:
 def run_update(through=None, limit=None, m: int = DEFAULT_M, log_path=None, engine: str = DEFAULT_ENGINE,
                sigma_update: str = params.DEFAULT_UPDATE_SIGMA_MODE,
                sigma_sim: str = params.DEFAULT_SIM_SIGMA_MODE,
-               sim_corr: str = params.DEFAULT_SIM_CORR_MODE, pace: str = params.DEFAULT_PACE_MODE) -> dict:
+               sim_corr: str = params.DEFAULT_SIM_CORR_MODE, pace: str = params.DEFAULT_PACE_MODE,
+               home: str = params.DEFAULT_HOME_MODE) -> dict:
     """
     Apply every finished, not-yet-applied game (oldest first) to priors.json; saves after
     each game. Each game is first predicted from the current priors and logged to
     `log_path` (default prediction_log.csv). `through` = last date to include
     (YYYY-MM-DD), `limit` = max games to apply. pace="on" also needs each game's
     possessions (a game without them is skipped and not recorded, like missing factors).
+    home="on" adds the home boost except at neutral sites (flag from NBA.com's schedule).
     Returns {"applied": [ids], "skipped": [(id, reason)], "already": count, "remaining": count,
              "disagreements": [game log vs schedule warnings], "metrics": {...} of the whole log}.
     """
     log_path = Path(log_path or LOG_PATH)
     update_sigma, sim_sigma = params.update_sigma(sigma_update), params.sim_sigma(sigma_sim)
     params.sim_corr(sim_corr)                     # validates the setting (and the matrix) before any work
+    params.home_offsets(home)                     # validates the setting (and the boost) before any work
     with_pace = params.is_on(pace, "pace")
     _quiet_pymc()
     applied = load_applied()
@@ -316,7 +348,7 @@ def run_update(through=None, limit=None, m: int = DEFAULT_M, log_path=None, engi
           f"{already} already applied, {len(todo)} to go"
           + (f" (stopping after {limit})" if limit is not None and limit < len(todo) else "")
           + f". M={m}, tau={season_tau(m):.5f}, engine={engine}, sigma update={sigma_update} sim={sigma_sim}, "
-            f"sim_corr={sim_corr}, pace={pace}\n")
+            f"sim_corr={sim_corr}, pace={pace}, home={home}\n")
 
     done, skipped = [], []
     start = time.perf_counter()
@@ -343,10 +375,10 @@ def run_update(through=None, limit=None, m: int = DEFAULT_M, log_path=None, engi
         if with_pace:
             game = boxscores.with_possessions(game, possessions)
         # before applying: the prediction uses pre-game priors
-        log_prediction(priors, game, log_path, sim_sigma, sim_corr=sim_corr, pace=pace)
+        log_prediction(priors, game, log_path, sim_sigma, sim_corr=sim_corr, pace=pace, home=home)
         new_priors = apply_game(copy.deepcopy(priors), game, m, random_seed=fit_seed(game["game_id"]), engine=engine,
-                                sigma=update_sigma, pace=pace)
-        record_game(new_priors, applied, game, engine, sigma_update, sigma_sim, sim_corr, pace)
+                                sigma=update_sigma, pace=pace, home=home)
+        record_game(new_priors, applied, game, engine, sigma_update, sigma_sim, sim_corr, pace, home)
         priors = new_priors
         done.append(game["game_id"])
         print(f"  [{len(done):>4}] {label}  {time.perf_counter() - t:.1f} s")
@@ -380,7 +412,7 @@ def _replay_game(game_id: str, entry: dict, factors: dict) -> dict:
 def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M, engine: str = DEFAULT_ENGINE,
            sigma_update: str = params.DEFAULT_UPDATE_SIGMA_MODE, sigma_sim: str = params.DEFAULT_SIM_SIGMA_MODE,
            overwrite: bool = False, sim_corr: str = params.DEFAULT_SIM_CORR_MODE,
-           pace: str = params.DEFAULT_PACE_MODE) -> dict:
+           pace: str = params.DEFAULT_PACE_MODE, home: str = params.DEFAULT_HOME_MODE) -> dict:
     """
     Season reset from `from_path` (std 0.1/sqrt(n)), then every game in applied_games.json,
     oldest first (date, gameId), each predicted + logged before it is applied. Writes ONLY
@@ -388,6 +420,8 @@ def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M
     and the box-score cache, never writes priors.json or applied_games.json. Existing
     --out/--log files are only replaced with overwrite=True (--overwrite).
     pace="on" needs team paces in `from_path` and each game's possessions (advanced box-score cache).
+    home="on" takes each game's neutral-site flag from the cached NBA.com schedule
+    (stats/schedules/, downloaded if missing); home="off" never reads it.
     """
     from_path, out_path, log_path = Path(from_path), Path(out_path), Path(log_path)
     protected = {p.resolve(): p.name for p in (PRIORS_PATH, APPLIED_GAMES_PATH, FROZEN_PRIORS_PATH, LOG_PATH,
@@ -401,7 +435,8 @@ def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M
         raise ValueError("--out and --log must be different files")
     update_sigma, sim_sigma = params.update_sigma(sigma_update), params.sim_sigma(sigma_sim)
     params.sim_corr(sim_corr)                     # validates the setting (and the matrix) before any work
-    with_pace = params.is_on(pace, "pace")
+    params.home_offsets(home)                     # validates the setting (and the boost) before any work
+    with_pace, with_home = params.is_on(pace, "pace"), params.is_on(home, "home")
     start_priors = load_json(from_path)
     if with_pace:
         require_pace(start_priors, from_path.name)
@@ -410,6 +445,7 @@ def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M
     if any("pending" in entry for entry in applied.values()):
         raise RuntimeError(f"{APPLIED_GAMES_PATH.name} has a pending game; run --update once to resolve it first")
     order = sorted(applied, key=lambda gid: (applied[gid]["date"], gid))
+    neutral = boxscores.neutral_games(order) if with_home else {}
 
     _quiet_pymc()
     priors = reset_priors(start_priors, n)
@@ -417,8 +453,9 @@ def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M
         log_path.unlink()   # a replay rebuilds its log from scratch
     print(f"Replaying {len(order)} games from {applied[order[0]]['date']} to {applied[order[-1]]['date']}, "
           f"oldest first, from {from_path.name} (N={n}, M={m}, engine={engine}, "
-          f"sigma update={sigma_update} sim={sigma_sim}, sim_corr={sim_corr}, pace={pace}) "
-          f"-> {out_path.name}, {log_path.name}\n")
+          f"sigma update={sigma_update} sim={sigma_sim}, sim_corr={sim_corr}, pace={pace}, home={home}) "
+          f"-> {out_path.name}, {log_path.name}"
+          + (f"; neutral sites: {', '.join(g for g in order if neutral[g]) or 'none'}" if with_home else "") + "\n")
 
     start = time.perf_counter()
     for i, game_id in enumerate(order, 1):
@@ -431,9 +468,12 @@ def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M
             if problem:
                 raise RuntimeError(f"can't replay {game_id}: {problem}")
             game = boxscores.with_possessions(game, possessions)
+        if with_home:
+            game["neutral"] = neutral[game_id]
         t = time.perf_counter()
-        log_prediction(priors, game, log_path, sim_sigma, sim_corr=sim_corr, pace=pace)
-        apply_game(priors, game, m, random_seed=fit_seed(game_id), engine=engine, sigma=update_sigma, pace=pace)
+        log_prediction(priors, game, log_path, sim_sigma, sim_corr=sim_corr, pace=pace, home=home)
+        apply_game(priors, game, m, random_seed=fit_seed(game_id), engine=engine, sigma=update_sigma, pace=pace,
+                   home=home)
         print(f"  [{i:>4}/{len(order)}] {game['date']}  {applied[game_id]['matchup']}  ({game_id})  "
               f"{time.perf_counter() - t:.1f} s")
 
@@ -443,32 +483,55 @@ def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M
 
 
 def trial(n: int = 5, m: int = DEFAULT_M, engine: str = DEFAULT_ENGINE,
-          sigma_update: str = params.DEFAULT_UPDATE_SIGMA_MODE) -> None:
-    """Dry run: apply the season's first n games to an in-memory copy of priors.json. Writes nothing."""
+          sigma_update: str = params.DEFAULT_UPDATE_SIGMA_MODE, pace: str = params.DEFAULT_PACE_MODE,
+          home: str = params.DEFAULT_HOME_MODE) -> None:
+    """
+    Dry run: apply the season's first n games to an in-memory copy of priors.json. Never
+    writes the priors (box scores and schedules are cached as usual). pace="on" also gets
+    each game's possessions (a game without them is left out); home="on" takes the
+    neutral-site flags from NBA.com's schedule.
+    """
     from boxscores import SEASON, fetch_games
+
+    params.home_offsets(home)                     # validates the setting (and the boost) before any work
+    with_pace, with_home = params.is_on(pace, "pace"), params.is_on(home, "home")
+    priors = load_json(PRIORS_PATH)
+    if with_pace:
+        require_pace(priors, PRIORS_PATH.name)
 
     _quiet_pymc()
     print(f"Fetching the first {n} {SEASON} games from NBA.com...")
     start = time.perf_counter()
     games = fetch_games(limit=n)
+    if with_pace:
+        kept = []
+        for game in games:
+            possessions, problem = boxscores.get_game_possessions(game["game_id"])
+            if problem:
+                print(f"  leaving out {game['game_id']}: {problem}")
+                continue
+            kept.append(boxscores.with_possessions(game, possessions))
+        games = kept
+    if with_home and games:
+        neutral = boxscores.neutral_games([g["game_id"] for g in games])
+        games = [{**g, "neutral": neutral[g["game_id"]]} for g in games]
     fetch_seconds = (time.perf_counter() - start) / max(len(games), 1)
 
-    priors = load_json(PRIORS_PATH)
     print(f"Applying them to an in-memory copy of {PRIORS_PATH.name} "
-          f"(M={m}, tau={season_tau(m):.5f}, engine={engine}). Nothing is written.\n")
+          f"(M={m}, tau={season_tau(m):.5f}, engine={engine}, pace={pace}, home={home}). Nothing is written.\n")
 
     seconds, max_shift = [], 0.0
     for game in games:
-        home, away = game["home"], game["away"]
-        before = copy.deepcopy({t["id"]: priors[t["id"]] for t in (home, away)})
+        home_team, away_team = game["home"], game["away"]   # (`home` is the home-court setting)
+        before = copy.deepcopy({t["id"]: priors[t["id"]] for t in (home_team, away_team)})
         start = time.perf_counter()
-        apply_game(priors, game, m, engine=engine, sigma=params.update_sigma(sigma_update))
+        apply_game(priors, game, m, engine=engine, sigma=params.update_sigma(sigma_update), pace=pace, home=home)
         seconds.append(time.perf_counter() - start)
 
-        winner = home if game["winner"] == home["id"] else away
-        print(f"{game['date']}  {away['abbr']} {away['pts']} @ {home['abbr']} {home['pts']}  "
+        winner = home_team if game["winner"] == home_team["id"] else away_team
+        print(f"{game['date']}  {away_team['abbr']} {away_team['pts']} @ {home_team['abbr']} {home_team['pts']}  "
               f"({winner['abbr']} won)  {seconds[-1]:.1f} s")
-        for team in (away, home):
+        for team in (away_team, home_team):
             for side in SIDES:
                 cells = []
                 for f in FACTORS:
@@ -479,7 +542,7 @@ def trial(n: int = 5, m: int = DEFAULT_M, engine: str = DEFAULT_ENGINE,
                 print(f"   {team['abbr']:<3} {side[:3]}  " + "   ".join(cells))
         print()
 
-    avg = sum(seconds) / len(seconds)
+    avg = sum(seconds) / max(len(seconds), 1)
     estimate = SEASON_GAMES * (avg + fetch_seconds)
     print(f"Seconds per game (fit): {avg:.1f} average  [{', '.join(f'{s:.1f}' for s in seconds)}]")
     print(f"Seconds per game (NBA.com download): {fetch_seconds:.1f}")
@@ -490,7 +553,7 @@ def trial(n: int = 5, m: int = DEFAULT_M, engine: str = DEFAULT_ENGINE,
 def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="In-season updates to priors.json.")
     parser.add_argument("--start-season", action="store_true",
-                        help=f"reset priors.json from {FROZEN_PRIORS_PATH.name} and clear "
+                        help=f"reset priors.json from --from (default {START_PRIORS_PATH.name}) and clear "
                              f"{APPLIED_GAMES_PATH.name}")
     parser.add_argument("--n", type=int, default=DEFAULT_N,
                         help="games of evidence the preseason prior is worth; std = 0.1/sqrt(N) "
@@ -522,6 +585,9 @@ def make_parser() -> argparse.ArgumentParser:
                         help="update team paces after each game and simulate possessions from them with the "
                              "corrected points formula; needs priors with team paces; "
                              f"default {params.DEFAULT_PACE_MODE}")
+    parser.add_argument("--home", choices=params.SWITCH_MODES, default=params.DEFAULT_HOME_MODE,
+                        help="add the fitted home-court boost to the expected value in the update and the "
+                             f"simulation (none at neutral sites); default {params.DEFAULT_HOME_MODE}")
     parser.add_argument("--overwrite", action="store_true", help="with --replay: allow replacing existing --out/--log")
     parser.add_argument("--log", metavar="CSV",
                         help=f"prediction log (--update default: {LOG_PATH.name}; required with --replay)")
@@ -529,7 +595,8 @@ def make_parser() -> argparse.ArgumentParser:
                         help="season reset from --from + every game in applied_games.json, oldest first, "
                              "into --out; never touches priors.json or applied_games.json")
     parser.add_argument("--from", dest="from_path", metavar="PRIORS",
-                        help="with --replay: preseason priors to reset from (e.g. priors_pre_2026-27.json)")
+                        help="with --replay (required) or --start-season (default "
+                             f"{START_PRIORS_PATH.name}): preseason priors to reset from")
     parser.add_argument("--out", metavar="PRIORS",
                         help="with --replay: where to write the replayed priors")
     return parser
@@ -559,8 +626,10 @@ def main(argv=None):
             parser.error("--replay runs on its own (not with --start-season, --update or --trial)")
         if not (args.from_path and args.out and args.log):
             parser.error("--replay needs --from, --out and --log")
-    elif args.from_path or args.out:
-        parser.error("--from and --out only work with --replay")
+    elif args.out:
+        parser.error("--out only works with --replay")
+    elif args.from_path and not args.start_season:
+        parser.error("--from only works with --replay or --start-season")
     elif args.overwrite:
         parser.error("--overwrite only works with --replay")
     elif args.log and not args.update:
@@ -572,15 +641,19 @@ def main(argv=None):
         try:
             replay(args.from_path, args.out, args.log, n=args.n, m=args.m, engine=args.engine,
                    sigma_update=args.sigma_update, sigma_sim=args.sigma_sim, overwrite=args.overwrite,
-                   sim_corr=args.sim_corr, pace=args.pace)
+                   sim_corr=args.sim_corr, pace=args.pace, home=args.home)
         except ValueError as err:
             parser.error(str(err))
         return
 
     if args.start_season:
-        start_season(args.n)
+        source = Path(args.from_path or START_PRIORS_PATH)
+        try:
+            start_season(args.n, source, pace=args.pace)
+        except ValueError as err:
+            parser.error(str(err))
         print(f"Reset {len(NBA_TEAMS)} NBA teams to std = {season_std(args.n):.5f} (N={args.n}) "
-              f"from {FROZEN_PRIORS_PATH.name} -> {PRIORS_PATH.name}; cleared {APPLIED_GAMES_PATH.name}")
+              f"from {source.name} -> {PRIORS_PATH.name}; cleared {APPLIED_GAMES_PATH.name}")
     if args.update:
         if args.pace == "on":
             try:
@@ -588,9 +661,11 @@ def main(argv=None):
             except ValueError as err:
                 parser.error(str(err))
         run_update(through=args.through, limit=args.limit, m=args.m, log_path=args.log, engine=args.engine,
-                   sigma_update=args.sigma_update, sigma_sim=args.sigma_sim, sim_corr=args.sim_corr, pace=args.pace)
+                   sigma_update=args.sigma_update, sigma_sim=args.sigma_sim, sim_corr=args.sim_corr, pace=args.pace,
+                   home=args.home)
     if args.trial is not None:
-        trial(args.trial, args.m, engine=args.engine, sigma_update=args.sigma_update)
+        trial(args.trial, args.m, engine=args.engine, sigma_update=args.sigma_update, pace=args.pace,
+              home=args.home)
 
 
 if __name__ == "__main__":

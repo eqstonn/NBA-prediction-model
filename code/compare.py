@@ -24,6 +24,8 @@ ROWS = [  # (label, metric key, format, higher is better; None = no "best")
     ("projected total", "proj_total", "{:.1f}", None),   # compare with the actual total: bias
     ("actual total", "actual_total", "{:.1f}", None),
     ("margin error SD", "margin_sd", "{:.2f}", None),    # SD of actual - projected margin
+    ("home margin, proj", "proj_home_margin", "{:+.2f}", None),   # compare with the actual home margin
+    ("home margin, act", "actual_home_margin", "{:+.2f}", None),
 ]
 
 

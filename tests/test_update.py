@@ -7,6 +7,9 @@ Run from the repo root:  python -m pytest tests
 test_exact_and_pymc_agree_on_real_games runs 10 real PyMC fits (~25 s); everything
 else uses the exact engine and is instant. tests/fixtures/games_2026-27_first5.json is
 the first 5 games of 2026-27 as boxscores returned them, so the tests run offline.
+These tests are about the factor update: they run apply_game and training with pace and
+home off (the fixtures have no possessions or neutral-site flags; see test_live.py for the
+live defaults).
 """
 import copy
 import hashlib
@@ -141,8 +144,8 @@ def test_exact_and_pymc_agree_on_real_games(season_priors):
     """The first 5 real games of 2026-27 through both engines: same answer within sampling tolerance."""
     exact, sampled = copy.deepcopy(season_priors), copy.deepcopy(season_priors)
     for i, game in enumerate(GAMES):
-        update.apply_game(exact, game, engine="exact")
-        update.apply_game(sampled, game, random_seed=SEED + 10 * i, engine="pymc")
+        update.apply_game(exact, game, engine="exact", pace="off", home="off")
+        update.apply_game(sampled, game, random_seed=SEED + 10 * i, engine="pymc", pace="off", home="off")
 
     played = {g[side]["id"] for g in GAMES for side in ("home", "away")}
     mean_gap = max(abs(exact[t][s][f]["mean"] - sampled[t][s][f]["mean"]) for t, s, f in curves(played))
@@ -163,7 +166,7 @@ def test_exact_is_the_default_and_never_loads_pymc():
     code = (f"import sys, json; sys.path.insert(0, {str(CODE_DIR)!r}); import update; "
             f"g = json.load(open({str(REPO_ROOT / 'tests' / 'fixtures' / 'games_2026-27_first5.json')!r}, encoding='utf-8'))[0]; "
             f"p = update.reset_priors(json.load(open({str(FROZEN)!r}, encoding='utf-8'))); "
-            "update.apply_game(p, g); print(update.DEFAULT_ENGINE, 'pymc' in sys.modules)")
+            "update.apply_game(p, g, pace='off', home='off'); print(update.DEFAULT_ENGINE, 'pymc' in sys.modules)")
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=300, cwd=REPO_ROOT)
     assert result.returncode == 0, result.stderr
     assert result.stdout.split()[-2:] == ["exact", "False"]
@@ -205,7 +208,7 @@ def test_tau_widens_only_the_two_teams_exactly(no_fit, m):
     game = GAMES[0]
     tau = 0.1 / m
 
-    update.apply_game(priors, game, m=m)
+    update.apply_game(priors, game, m=m, pace="off", home="off")
 
     assert len(no_fit) == 2  # one fit per side
     in_game = {game["home"]["id"], game["away"]["id"]}
@@ -264,7 +267,7 @@ def test_winner_offense_improves(season_priors):
             "away": {"id": lose, **as_expected_for_loser}}
     before = copy.deepcopy(priors)
 
-    update.apply_game(priors, game)
+    update.apply_game(priors, game, pace="off", home="off")
 
     for f in ("eFG", "ORB", "FTR"):
         assert priors[win]["offense"][f]["mean"] > before[win]["offense"][f]["mean"], f
@@ -299,7 +302,7 @@ def test_per_game_mean_shifts_damped(season_priors, mode):
     too_big = []
     for game in GAMES:
         before = copy.deepcopy(priors)
-        update.apply_game(priors, game, sigma=sigma)
+        update.apply_game(priors, game, sigma=sigma, pace="off", home="off")
         for side, other in (("home", "away"), ("away", "home")):
             team, opp = game[side], game[other]
             for f in FACTORS:
@@ -363,7 +366,7 @@ def assert_same_priors(actual, expected):
 def test_training_uses_only_the_window_before_the_cutoff(tmp_path):
     csv, out = tmp_path / "games.csv", tmp_path / "trained.json"
     write_training_csv(csv, TRAINING_ROWS)
-    dynamic_model.main(["--csv", str(csv), "--out", str(out), "--before", "2026-10-20"])
+    dynamic_model.main(["--csv", str(csv), "--out", str(out), "--before", "2026-10-20", "--pace", "off", "--home", "off"])
     trained = json.loads(out.read_text(encoding="utf-8"))
     assert_same_priors(trained, expected_training([TRAINING_ROWS[1], TRAINING_ROWS[3]]))
 
@@ -371,12 +374,14 @@ def test_training_uses_only_the_window_before_the_cutoff(tmp_path):
 def test_training_all_history_keeps_old_games_but_not_this_season(tmp_path):
     csv, out = tmp_path / "games.csv", tmp_path / "trained.json"
     write_training_csv(csv, TRAINING_ROWS)
-    dynamic_model.main(["--csv", str(csv), "--out", str(out), "--before", "2026-10-20", "--all-history"])
+    dynamic_model.main(["--csv", str(csv), "--out", str(out), "--before", "2026-10-20", "--all-history",
+                        "--pace", "off", "--home", "off"])
     trained = json.loads(out.read_text(encoding="utf-8"))
     assert_same_priors(trained, expected_training([TRAINING_ROWS[0], TRAINING_ROWS[1], TRAINING_ROWS[3]]))
 
 
-@pytest.mark.parametrize("name", ["priors_pre_2026-27.json", "priors.json", "applied_games.json"])
+@pytest.mark.parametrize("name", ["priors_pre_2026-27.json", "priors_pre_2026-27_pace-home.json", "priors.json",
+                                  "applied_games.json"])
 def test_training_refuses_to_overwrite_protected_files(tmp_path, name):
     csv = tmp_path / "games.csv"
     write_training_csv(csv, TRAINING_ROWS)

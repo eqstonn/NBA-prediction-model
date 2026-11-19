@@ -8,12 +8,18 @@ Game-to-game noise sigma, one value per four factor, chosen separately for the t
   "legacy"  the values before Phase 6: the update used 0.05 for every factor, the
             simulation 0.05 / 0.02 / 0.05 / 0.02 (eFG / TOV / ORB / FTR).
 
-Defaults: fitted for the UPDATE, legacy for the SIMULATION. That split scored best on
-2026-27 (Brier 0.2057). With the fitted sigma, the simulation draws the four factors
-independently and spreads final margins too wide (SD 19.9 pts vs 15.5 real), so its
-win probabilities are too timid. Legacy for both reproduces log_exact.csv exactly.
+Defaults: fitted for both, the live model since the pace-home switch (see below). With the
+OLD points formula (pace off), the fitted sigma spreads final margins too wide (SD 19.9 pts
+vs 15.5 real); legacy sim sigma was the better match there (Phase 6, log_sigma-update.csv).
+With pace on, the corrected formula gets the scale right and the fitted sigma calibrates.
+Legacy for both + every switch off reproduces log_exact.csv exactly.
 
-Simulation switches (Phase 7), each "on" or "off", default "off" (= the old simulation):
+LIVE DEFAULTS (pace-home): exact engine, sigma update fitted, sigma sim fitted, pace on,
+sim_corr off, home on. Picked on the training data (train_calibration.py: Brier 0.2264 vs
+0.2346 for the old live simulation, 5.5 paired SE); log_pace-home.csv is its 2026-27 replay.
+The old live model (Phase 6) is --sigma-sim legacy --pace off --home off.
+
+Simulation switches (Phase 7), each "on" or "off" (off = the old simulation):
 
   sim_corr  draw the 8 game factors (both teams' eFG/TOV/ORB/FTR) jointly with the
             correlation in model_params.json["factor_corr"] instead of independently
@@ -21,8 +27,17 @@ Simulation switches (Phase 7), each "on" or "off", default "off" (= the old simu
             noise model_params.json["pace"]["sigma"], and the corrected points formula
             (model_params.json["points"]); off = 100 possessions and the old formula
 
-Both off with legacy sim sigma reproduces log_sigma-update.csv exactly.
+Defaults: sim_corr off, pace on. Both off with legacy sim sigma and home off reproduces
+log_sigma-update.csv exactly.
 code/fit_sim.py estimates factor_corr, points and pace from the training data only.
+
+Home court (Phase 8), "on" or "off", default "on":
+
+  home      add model_params.json["home"] to the expected value of each line in the
+            update and the simulation: the home team's offensive line gets
+            home["offense"][f], the away team's offensive line (what the home defense
+            allows) gets home["defense"][f]. Neutral-site games get nothing.
+            code/fit_home.py estimates it from the training data only.
 """
 import json
 import math
@@ -34,14 +49,15 @@ PARAMS_PATH = REPO_ROOT / "model_params.json"
 FACTORS = ("eFG", "TOV", "ORB", "FTR")
 SIGMA_MODES = ("fitted", "legacy")
 DEFAULT_UPDATE_SIGMA_MODE = "fitted"
-DEFAULT_SIM_SIGMA_MODE = "legacy"
+DEFAULT_SIM_SIGMA_MODE = "fitted"
 
 LEGACY_UPDATE_SIGMA = {"eFG": 0.05, "TOV": 0.05, "ORB": 0.05, "FTR": 0.05}
 LEGACY_SIM_SIGMA = {"eFG": 0.05, "TOV": 0.02, "ORB": 0.05, "FTR": 0.02}
 
 SWITCH_MODES = ("on", "off")
 DEFAULT_SIM_CORR_MODE = "off"
-DEFAULT_PACE_MODE = "off"
+DEFAULT_PACE_MODE = "on"
+DEFAULT_HOME_MODE = "on"
 # rows/columns of the factor correlation: the team's offensive line, then the opponent's
 CORR_LABELS = tuple(f"team {f}" for f in FACTORS) + tuple(f"opponent {f}" for f in FACTORS)
 
@@ -82,7 +98,7 @@ def update_sigma(mode: str = DEFAULT_UPDATE_SIGMA_MODE) -> dict:
 
 
 def sim_sigma(mode: str = DEFAULT_SIM_SIGMA_MODE) -> dict:
-    """Game noise used by the Monte Carlo simulation, per factor (default: legacy)."""
+    """Game noise used by the Monte Carlo simulation, per factor (default: fitted)."""
     _check_mode(mode)
     return fitted_sigma() if mode == "fitted" else dict(LEGACY_SIM_SIGMA)
 
@@ -98,10 +114,13 @@ def is_on(mode: str, what: str = "switch") -> bool:
     return mode == "on"
 
 
+FITTED_BY = {"factor_corr": "fit_sim.py", "points": "fit_sim.py", "pace": "fit_sim.py", "home": "fit_home.py"}
+
+
 def section(name: str) -> dict:
     data = load_params()
     if name not in data:
-        raise KeyError(f"{PARAMS_PATH.name} has no {name!r} section; run python code/fit_sim.py")
+        raise KeyError(f"{PARAMS_PATH.name} has no {name!r} section; run python code/{FITTED_BY.get(name, 'fit_sim.py')}")
     return data[name]
 
 
@@ -167,3 +186,35 @@ def pace_tau(m: int) -> float:
     if m <= 0:
         raise ValueError(f"m must be a positive integer, got {m}")
     return pace_scale() / m
+
+
+# ---------------------------------------------------------------------------
+# Phase 8: home court
+# ---------------------------------------------------------------------------
+
+def check_home(boost: dict) -> dict:
+    """{"offense": {factor: shift}, "defense": {factor: shift}} with a number for every factor."""
+    out = {}
+    for side in ("offense", "defense"):
+        values = boost.get(side, {})
+        if set(values) != set(FACTORS) or not all(isinstance(v, (int, float)) and abs(v) < 0.2 for v in values.values()):
+            raise ValueError(f"home boost {side} must have a small number for each of {FACTORS}, got {values}")
+        out[side] = {f: float(values[f]) for f in FACTORS}
+    return out
+
+
+def home_boost() -> dict:
+    """The fitted home boost (model_params.json["home"])."""
+    return check_home(section("home"))
+
+
+def home_offsets(mode: str = DEFAULT_HOME_MODE, neutral: bool = False, boost=None):
+    """
+    (offset of the home team's offensive line, offset of the away team's offensive line),
+    each {factor: shift} to add to the expected value, or (None, None) when home is off or
+    the game is at a neutral site. boost: default home_boost().
+    """
+    if not is_on(mode, "home") or neutral:
+        return None, None
+    b = check_home(boost) if boost is not None else home_boost()
+    return b["offense"], b["defense"]

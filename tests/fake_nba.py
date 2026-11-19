@@ -60,6 +60,7 @@ class FakeNBA:
         self.sched_missing = set()
         self.sched_scores = {}
         self.no_possessions = set()   # games whose advanced box score lacks the home team's possessions
+        self.neutral = set()          # games the schedule marks isNeutral (e.g. Mexico City)
         self.log_requests = []
         self.schedule_requests = 0
         self.box_requests = []
@@ -79,6 +80,7 @@ class FakeNBA:
                 "gameStatus": 1 if a_pts is None else 3, "gameStatusText": "7:30 pm ET" if a_pts is None else "Final",
                 "gameLabel": "Emirates NBA Cup" if cup else ("Preseason" if gid.startswith("001") else ""),
                 "gameSubtype": ("in-season-knockout" if gid.startswith("006") else "in-season") if cup else "",
+                "isNeutral": gid in self.neutral,
                 "homeTeam": {"teamId": int(ID[home]), "teamTricode": home, "score": h_pts},
                 "awayTeam": {"teamId": int(ID[away]), "teamTricode": away, "score": a_pts},
             })
@@ -177,6 +179,7 @@ class Env:
         self.mp.setattr(update, "LOG_PATH", folder / "prediction_log.csv")
         self.mp.setattr(boxscores, "CACHE_DIR", folder / "boxscores")
         self.mp.setattr(boxscores, "ADVANCED_CACHE_DIR", folder / "boxscores_advanced")
+        self.mp.setattr(boxscores, "SCHEDULE_CACHE_DIR", folder / "schedules")
 
     def use(self, folder):
         """point_at(folder) and start the season there."""

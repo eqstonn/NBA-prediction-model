@@ -3,8 +3,9 @@ Tests for the per-factor game noise sigma (code/params.py, code/fit_sigma.py):
 
   - sigma is read from model_params.json
   - the update and the simulation take their sigma separately (--sigma-update / --sigma-sim),
-    with defaults fitted (update) and legacy (simulation) everywhere
-  - legacy for both reproduces the pre-Phase-6 results exactly
+    with default fitted for both everywhere (the live pace-home model; Phase 6 had legacy sim)
+  - legacy for both (pace and home off) reproduces the pre-Phase-6 results exactly
+The noise-scale spies use pace="off", home="off" (the toy priors have no paces).
   - the estimator recovers a known sigma
 
 Run from the repo root:  python -m pytest tests
@@ -106,7 +107,8 @@ def test_model_params_file_holds_the_fit():
 def test_fitted_sigma_is_read_from_model_params(custom_params, sim_scales):
     assert params.update_sigma("fitted") == params.sim_sigma("fitted") == custom_params
     assert update_uses(custom_params)                                   # update default = fitted
-    simulation.simulate_factors("HOME", "AWAY", toy_priors(), seed=1, sigma=params.sim_sigma("fitted"))
+    simulation.simulate_factors("HOME", "AWAY", toy_priors(), seed=1, sigma=params.sim_sigma("fitted"), pace="off",
+                                home="off")
     assert sim_scales == [custom_params[f] for f in FACTORS] * 2
 
 
@@ -114,43 +116,52 @@ def test_legacy_values_are_the_old_model(sim_scales):
     assert params.update_sigma("legacy") == {f: 0.05 for f in FACTORS}
     assert params.sim_sigma("legacy") == {"eFG": 0.05, "TOV": 0.02, "ORB": 0.05, "FTR": 0.02}
     assert update_uses({f: 0.05 for f in FACTORS}, sigma=params.update_sigma("legacy"))
-    simulation.simulate_factors("HOME", "AWAY", toy_priors(), seed=1, sigma=params.sim_sigma("legacy"))
+    simulation.simulate_factors("HOME", "AWAY", toy_priors(), seed=1, sigma=params.sim_sigma("legacy"), pace="off",
+                                home="off")
     assert sim_scales == LEGACY_SIM
 
 
 # ---------------------------------------------------------------------------
-# defaults: fitted for the update, legacy for the simulation, everywhere
+# defaults: fitted for the update and the simulation, everywhere
 # ---------------------------------------------------------------------------
 
 def test_default_modes():
     assert params.DEFAULT_UPDATE_SIGMA_MODE == "fitted"
-    assert params.DEFAULT_SIM_SIGMA_MODE == "legacy"
+    assert params.DEFAULT_SIM_SIGMA_MODE == "fitted"
     assert params.update_sigma() == FITTED
-    assert params.sim_sigma() == params.LEGACY_SIM_SIGMA
+    assert params.sim_sigma() == FITTED
 
 
 def test_update_defaults_to_fitted():
     assert update_uses(FITTED)                                           # bayes_update.update_game
 
 
-def test_simulation_predict_and_site_default_to_legacy(sim_scales):
-    simulation.simulate_factors("HOME", "AWAY", toy_priors(), seed=1)
-    assert sim_scales == LEGACY_SIM
+def with_paces(priors):
+    for team in priors.values():
+        team["pace"] = {"mean": 100.0, "std": 2.0}
+    return priors
+
+
+def test_simulation_predict_and_site_default_to_fitted(sim_scales):
+    """Default game noise: fitted per factor for both lines, then the pace noise (pace is on by default)."""
+    fitted_then_pace = [FITTED[f] for f in FACTORS] * 2 + [params.pace_sigma()]
+    simulation.simulate_factors("HOME", "AWAY", with_paces(toy_priors()), seed=1)
+    assert sim_scales == fitted_then_pace
     sim_scales.clear()
-    predict.predict_game("HOME", "AWAY", toy_priors(), seed=1)
-    assert sim_scales == LEGACY_SIM
+    predict.predict_game("HOME", "AWAY", with_paces(toy_priors()), seed=1)
+    assert sim_scales == fitted_then_pace
     sim_scales.clear()
     build_site.build_predictions([{"home": {"id": "HOME", "abbr": "H", "score": None},
                                    "away": {"id": "AWAY", "abbr": "A", "score": None}, "status": "scheduled"}],
-                                 toy_priors())
-    assert sim_scales == LEGACY_SIM
+                                 with_paces(toy_priors()))
+    assert sim_scales == fitted_then_pace
 
 
 def test_command_line_defaults():
     u = update.make_parser().parse_args([])
-    assert (u.sigma_update, u.sigma_sim) == ("fitted", "legacy")
+    assert (u.sigma_update, u.sigma_sim) == ("fitted", "fitted")
     assert dynamic_model.make_parser().parse_args(["--out", "x.json", "--before", "2026-10-03"]).sigma_update == "fitted"
-    assert build_site.make_parser().parse_args([]).sigma_sim == "legacy"
+    assert build_site.make_parser().parse_args([]).sigma_sim == "fitted"
 
 
 # ---------------------------------------------------------------------------
@@ -191,15 +202,15 @@ def test_command_line_sets_them_separately(env, seen_sigma, tmp_path):
     update.main(["--update", "--sigma-update", "legacy", "--sigma-sim", "fitted"])
     assert seen_sigma["update"][0] == params.LEGACY_UPDATE_SIGMA and seen_sigma["sim"][0] == FITTED
     seen_sigma["update"].clear(), seen_sigma["sim"].clear()
-    update.main(["--replay", "--from", str(update.FROZEN_PRIORS_PATH), "--out", str(tmp_path / "p.json"),
-                 "--log", str(tmp_path / "l.csv"), "--sigma-sim", "fitted"])
-    assert seen_sigma["update"][0] == FITTED and seen_sigma["sim"][0] == FITTED
+    update.main(["--replay", "--from", str(update.START_PRIORS_PATH), "--out", str(tmp_path / "p.json"),
+                 "--log", str(tmp_path / "l.csv"), "--sigma-sim", "legacy"])
+    assert seen_sigma["update"][0] == FITTED and seen_sigma["sim"][0] == params.LEGACY_SIM_SIGMA
 
 
 def test_update_run_records_engine_and_both_sigmas(env):
     update.run_update()
     assert {(e["engine"], e["sigma_update"], e["sigma_sim"]) for e in env.applied().values()} == \
-           {("exact", "fitted", "legacy")}
+           {("exact", "fitted", "fitted")}
 
 
 def test_bad_sigma_settings_are_rejected(tmp_path, monkeypatch):
@@ -236,7 +247,8 @@ def box_cache_complete():
 def test_legacy_replay_reproduces_log_exact(tmp_path):
     out, log = tmp_path / "priors.json", tmp_path / "log.csv"
     update.main(["--replay", "--from", str(REPO_ROOT / "priors_pre_2026-27_exact.json"), "--out", str(out),
-                 "--log", str(log), "--n", "20", "--m", "30", "--sigma-update", "legacy", "--sigma-sim", "legacy"])
+                 "--log", str(log), "--n", "20", "--m", "30", "--sigma-update", "legacy", "--sigma-sim", "legacy",
+                 "--pace", "off", "--home", "off"])
     assert log.read_text(encoding="utf-8").splitlines() == \
         (REPO_ROOT / "log_exact.csv").read_text(encoding="utf-8").splitlines()
     assert json.loads(out.read_text(encoding="utf-8")) == \
@@ -244,10 +256,10 @@ def test_legacy_replay_reproduces_log_exact(tmp_path):
 
 
 @pytest.mark.skipif(not box_cache_complete(), reason="needs the box-score cache in stats/boxscores/")
-def test_default_replay_reproduces_log_sigma_update(tmp_path):
+def test_phase6_replay_reproduces_log_sigma_update(tmp_path):
     out, log = tmp_path / "priors.json", tmp_path / "log.csv"
     update.main(["--replay", "--from", str(REPO_ROOT / "priors_pre_2026-27_sigma-update.json"), "--out", str(out),
-                 "--log", str(log), "--n", "20", "--m", "30"])
+                 "--log", str(log), "--n", "20", "--m", "30", "--sigma-sim", "legacy", "--pace", "off", "--home", "off"])
     assert log.read_text(encoding="utf-8").splitlines() == \
         (REPO_ROOT / "log_sigma-update.csv").read_text(encoding="utf-8").splitlines()
 
@@ -255,7 +267,8 @@ def test_default_replay_reproduces_log_sigma_update(tmp_path):
 @pytest.mark.skipif(not dynamic_model.DEFAULT_CSV.exists(), reason="needs the Kaggle CSV in stats/")
 def test_legacy_training_reproduces_priors_pre_exact(tmp_path):
     out = tmp_path / "trained.json"
-    dynamic_model.main(["--out", str(out), "--before", "2026-10-03", "--sigma-update", "legacy"])
+    dynamic_model.main(["--out", str(out), "--before", "2026-10-03", "--sigma-update", "legacy", "--pace", "off",
+                        "--home", "off"])
     assert json.loads(out.read_text(encoding="utf-8")) == \
         json.loads((REPO_ROOT / "priors_pre_2026-27_exact.json").read_text(encoding="utf-8"))
 

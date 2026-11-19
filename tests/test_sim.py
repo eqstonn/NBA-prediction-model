@@ -6,7 +6,9 @@ bayes_update.py / update.py / dynamic_model.py / boxscores.py):
     --sim-corr on draws the game factors with that matrix
   - the corrected points formula, and that it removes the old formula's totals bias
   - pace: the exact update (hand-computed), the season reset, --update / --replay with --pace on
-  - both switches off (+ legacy sim sigma) reproduce log_sigma-update.csv exactly
+  - both switches off (+ legacy sim sigma, home off) reproduce log_sigma-update.csv exactly
+The Phase 7 tests pass home="off" (their model_params.json has no home section); the live
+defaults are tested in test_live.py.
   - none of this writes priors.json, applied_games.json or any existing priors/log file
 
 Run from the repo root:  python -m pytest tests
@@ -139,23 +141,23 @@ def test_sim_corr_switch_picks_the_draws(phase7_params, monkeypatch):
     real_ind, real_corr = simulation.independent_factors, simulation.correlated_factors
     monkeypatch.setattr(simulation, "independent_factors", lambda *a, **k: calls.append("off") or real_ind(*a, **k))
     monkeypatch.setattr(simulation, "correlated_factors",
-                        lambda rng, a, b, s, corr, n: calls.append(corr) or real_corr(rng, a, b, s, corr, n))
-    simulation.simulate_factors(HOME, AWAY, toy_priors(), seed=1)
-    simulation.simulate_factors(HOME, AWAY, toy_priors(), seed=1, sim_corr="off")
-    simulation.simulate_factors(HOME, AWAY, toy_priors(), seed=1, sim_corr="on")
+                        lambda rng, a, b, s, corr, *rest: calls.append(corr) or real_corr(rng, a, b, s, corr, *rest))
+    simulation.simulate_factors(HOME, AWAY, toy_priors(), seed=1, home="off")
+    simulation.simulate_factors(HOME, AWAY, toy_priors(), seed=1, sim_corr="off", home="off")
+    simulation.simulate_factors(HOME, AWAY, toy_priors(), seed=1, sim_corr="on", home="off")
     assert calls == ["off", "off", KNOWN.tolist()]
 
 
 def test_shared_noise_between_the_teams_narrows_margins(phase7_params, tmp_path, monkeypatch):
     """With both teams' eFG noise strongly correlated, simulated margins spread less than with independent draws."""
-    independent = simulation.simulate_factors(HOME, AWAY, toy_priors(), seed=5, sigma=SIGMA)
+    independent = simulation.simulate_factors(HOME, AWAY, toy_priors(), seed=5, sigma=SIGMA, home="off")
     strong = np.eye(8)
     strong[0, 4] = strong[4, 0] = 0.8
     custom = dict(phase7_params, factor_corr={"labels": list(params.CORR_LABELS), "matrix": strong.tolist()})
     path = tmp_path / "strong.json"
     path.write_text(json.dumps(custom), encoding="utf-8")
     monkeypatch.setattr(params, "PARAMS_PATH", path)
-    joint = simulation.simulate_factors(HOME, AWAY, toy_priors(), seed=5, sigma=SIGMA, sim_corr="on")
+    joint = simulation.simulate_factors(HOME, AWAY, toy_priors(), seed=5, sigma=SIGMA, sim_corr="on", home="off")
     assert joint["margin_sd"] < 0.9 * independent["margin_sd"]
 
 
@@ -197,22 +199,22 @@ def test_legacy_points_is_the_original_formula():
 
 
 def test_pace_on_simulates_realistic_totals_and_uses_team_paces(phase7_params):
-    off = simulation.simulate_factors(HOME, AWAY, toy_priors(), seed=2, sigma=SIGMA)
-    on = simulation.simulate_factors(HOME, AWAY, toy_priors(), seed=2, sigma=SIGMA, pace="on")
+    off = simulation.simulate_factors(HOME, AWAY, toy_priors(), seed=2, sigma=SIGMA, pace="off", home="off")
+    on = simulation.simulate_factors(HOME, AWAY, toy_priors(), seed=2, sigma=SIGMA, pace="on", home="off")
     assert on["possessions"] == pytest.approx(100.0, abs=0.2)   # (98 + 102) / 2
     assert off["possessions"] == 100
     # the old formula's +~17 per game at league-average factors is gone
     assert on["team_a_avg_score"] + on["team_b_avg_score"] < off["team_a_avg_score"] + off["team_b_avg_score"] - 12
     fast = toy_priors()
     fast[HOME]["pace"]["mean"] = fast[AWAY]["pace"]["mean"] = 110.0
-    quick = simulation.simulate_factors(HOME, AWAY, fast, seed=2, sigma=SIGMA, pace="on")
+    quick = simulation.simulate_factors(HOME, AWAY, fast, seed=2, sigma=SIGMA, pace="on", home="off")
     assert quick["possessions"] == pytest.approx(110.0, abs=0.2)
     assert quick["team_a_avg_score"] > on["team_a_avg_score"] * 1.07
 
 
 def test_pace_on_needs_pace_curves(phase7_params):
     with pytest.raises(KeyError, match="pace"):
-        simulation.simulate_factors(HOME, AWAY, toy_priors(pace=False), seed=1, pace="on")
+        simulation.simulate_factors(HOME, AWAY, toy_priors(pace=False), seed=1, pace="on", home="off")
 
 
 # ---------------------------------------------------------------------------
@@ -247,8 +249,8 @@ def test_pace_update_is_the_factor_formula():
 def test_apply_game_updates_pace_only_when_on(phase7_params):
     game = {"game_id": "X", "home": {"id": HOME, **{f: LEAGUE[f] + 0.02 for f in FACTORS}},
             "away": {"id": AWAY, **{f: LEAGUE[f] - 0.01 for f in FACTORS}}, "possessions": 104.0}
-    on = update.apply_game(toy_priors(), game, m=30, pace="on")
-    off = update.apply_game(toy_priors(), game, m=30)
+    on = update.apply_game(toy_priors(), game, m=30, pace="on", home="off")
+    off = update.apply_game(toy_priors(), game, m=30, pace="off", home="off")
     assert off[HOME]["pace"] == toy_priors()[HOME]["pace"] and off[AWAY]["pace"] == toy_priors()[AWAY]["pace"]
     for team in (HOME, AWAY):   # the factors don't depend on pace
         assert {k: v for k, v in on[team].items() if k != "pace"} == {k: v for k, v in off[team].items() if k != "pace"}
@@ -256,7 +258,7 @@ def test_apply_game_updates_pace_only_when_on(phase7_params):
     bayes_update.update_pace(expected, HOME, AWAY, 104.0, tau=2 * 4.8 / 30, sigma=4.8)
     assert on[HOME]["pace"] == expected[HOME]["pace"] and on[AWAY]["pace"] == expected[AWAY]["pace"]
     with pytest.raises(KeyError, match="possessions"):
-        update.apply_game(toy_priors(), {k: v for k, v in game.items() if k != "possessions"}, pace="on")
+        update.apply_game(toy_priors(), {k: v for k, v in game.items() if k != "possessions"}, pace="on", home="off")
 
 
 def test_season_reset_sets_pace_std(phase7_params):
@@ -306,12 +308,14 @@ def test_game_without_possessions_is_skipped_and_not_recorded(env):
 
 
 def test_pace_off_never_downloads_possessions(env):
-    update.run_update()
+    update.run_update(pace="off")
     assert env.nba.advanced_requests == []
     assert {(e["sim_corr"], e["pace"]) for e in env.applied().values()} == {("off", "off")}
 
 
 def test_pace_on_needs_team_paces(env, tmp_path):
+    no_paces = json.loads(update.FROZEN_PRIORS_PATH.read_text(encoding="utf-8"))
+    update.write_json(update.PRIORS_PATH, update.reset_priors(no_paces))
     with pytest.raises(ValueError, match="pace"):
         update.run_update(pace="on")
     with pytest.raises(SystemExit):
@@ -341,16 +345,16 @@ def test_replay_with_pace_and_corr(env, tmp_path):
 # defaults, settings
 # ---------------------------------------------------------------------------
 
-def test_switches_default_off_everywhere():
-    assert params.DEFAULT_SIM_CORR_MODE == params.DEFAULT_PACE_MODE == "off"
+def test_switch_defaults_are_sim_corr_off_and_pace_on_everywhere(phase7_params):
+    assert (params.DEFAULT_SIM_CORR_MODE, params.DEFAULT_PACE_MODE) == ("off", "on")
     u = update.make_parser().parse_args([])
-    assert (u.sim_corr, u.pace) == ("off", "off")
-    assert dynamic_model.make_parser().parse_args(["--out", "x.json", "--before", "2026-10-03"]).pace == "off"
+    assert (u.sim_corr, u.pace) == ("off", "on")
+    assert dynamic_model.make_parser().parse_args(["--out", "x.json", "--before", "2026-10-03"]).pace == "on"
     b = build_site.make_parser().parse_args([])
-    assert (b.sim_corr, b.pace) == ("off", "off")
+    assert (b.sim_corr, b.pace) == ("off", "on")
     priors = toy_priors()
-    assert simulation.simulate_factors(HOME, AWAY, priors, seed=9) == \
-        simulation.simulate_factors(HOME, AWAY, priors, seed=9, sim_corr="off", pace="off")
+    assert simulation.simulate_factors(HOME, AWAY, priors, seed=9, home="off") == \
+        simulation.simulate_factors(HOME, AWAY, priors, seed=9, sim_corr="off", pace="on", home="off")
 
 
 def test_bad_switch_settings_are_rejected(tmp_path, monkeypatch):
@@ -418,7 +422,7 @@ def test_switches_off_reproduce_log_sigma_update(tmp_path):
     out, log = tmp_path / "priors.json", tmp_path / "log.csv"
     update.main(["--replay", "--from", str(REPO_ROOT / "priors_pre_2026-27_sigma-update.json"), "--out", str(out),
                  "--log", str(log), "--n", "20", "--m", "30", "--sim-corr", "off", "--pace", "off",
-                 "--sigma-sim", "legacy"])
+                 "--sigma-sim", "legacy", "--home", "off"])
     assert sha(log) == sha(REPO_ROOT / "log_sigma-update.csv")
     assert json.loads(out.read_text(encoding="utf-8")) == \
         json.loads((REPO_ROOT / "priors_2026-27_sigma-update.json").read_text(encoding="utf-8"))
@@ -432,7 +436,7 @@ def test_combined_replay_reproduces_log_corr_pace(tmp_path):
     out, log = tmp_path / "priors.json", tmp_path / "log.csv"
     update.main(["--replay", "--from", str(REPO_ROOT / "priors_pre_2026-27_pace.json"), "--out", str(out),
                  "--log", str(log), "--n", "20", "--m", "30", "--sim-corr", "on", "--pace", "on",
-                 "--sigma-sim", "fitted"])
+                 "--sigma-sim", "fitted", "--home", "off"])
     assert sha(log) == sha(REPO_ROOT / "log_corr-pace.csv")
     assert json.loads(out.read_text(encoding="utf-8")) == \
         json.loads((REPO_ROOT / "priors_2026-27_corr-pace.json").read_text(encoding="utf-8"))
@@ -443,7 +447,7 @@ def test_combined_replay_reproduces_log_corr_pace(tmp_path):
 def test_training_with_pace_keeps_the_factors(tmp_path):
     before = repo_data_hashes()
     out = tmp_path / "trained.json"
-    dynamic_model.main(["--out", str(out), "--before", "2026-10-03", "--pace", "on"])
+    dynamic_model.main(["--out", str(out), "--before", "2026-10-03", "--pace", "on", "--home", "off"])
     trained = json.loads(out.read_text(encoding="utf-8"))
     assert trained == json.loads((REPO_ROOT / "priors_pre_2026-27_pace.json").read_text(encoding="utf-8"))
     factors_only = {t: {k: v for k, v in c.items() if k != "pace"} for t, c in trained.items()}

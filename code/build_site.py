@@ -4,8 +4,10 @@ Build the predictions website for this week's NBA games.
     python code/build_site.py                 # today + next 6 days
     python code/build_site.py --start 2026-11-16 --days 7
     python code/build_site.py --priors other_priors.json
-    python code/build_site.py --sigma-sim fitted  # simulation game noise (default legacy, see params.py)
-    python code/build_site.py --sim-corr on --pace on --sigma-sim fitted   # Phase 7 simulation (default off)
+    Defaults = the live model (params.py): fitted sim sigma, --pace on, --sim-corr off, --home on;
+    needs priors with team paces (priors.json has them).
+    python code/build_site.py --sigma-sim legacy --pace off --home off   # the previous live simulation
+    python code/build_site.py --sim-corr on                              # Phase 7 correlated factors
 
 Writes site/index.html (open it in a browser) and site/predictions.json.
 """
@@ -25,14 +27,16 @@ EASTERN = ZoneInfo("America/New_York")
 
 
 def build_predictions(games, model, sim_sigma=None, sim_corr: str = params.DEFAULT_SIM_CORR_MODE,
-                      pace: str = params.DEFAULT_PACE_MODE):
+                      pace: str = params.DEFAULT_PACE_MODE, home: str = params.DEFAULT_HOME_MODE):
     """
-    sim_sigma: {factor: game noise} for the simulation; None = params.sim_sigma() (legacy by default).
-    sim_corr / pace: "on" or "off" (default off, see simulation.py).
+    sim_sigma: {factor: game noise} for the simulation; None = params.sim_sigma() (fitted by default).
+    sim_corr / pace / home: "on" or "off" (defaults in params.py, see simulation.py); a game with
+    "neutral": True gets no home boost.
     """
     rows = []
     for g in games:
-        pred = predict_game(g["home"]["id"], g["away"]["id"], model, sigma=sim_sigma, sim_corr=sim_corr, pace=pace)
+        pred = predict_game(g["home"]["id"], g["away"]["id"], model, sigma=sim_sigma, sim_corr=sim_corr, pace=pace,
+                            home=home, neutral=g.get("neutral", False))
         row = dict(g, prediction=pred)
         if pred:
             home_fav = pred["home_win_pct"] >= pred["away_win_pct"]
@@ -186,6 +190,9 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--pace", choices=params.SWITCH_MODES, default=params.DEFAULT_PACE_MODE,
                         help="possessions from the teams' pace curves + the corrected points formula; needs "
                              f"priors with team paces (default {params.DEFAULT_PACE_MODE})")
+    parser.add_argument("--home", choices=params.SWITCH_MODES, default=params.DEFAULT_HOME_MODE,
+                        help="add the fitted home-court boost (none at neutral sites); use priors trained with "
+                             f"--home on (default {params.DEFAULT_HOME_MODE})")
     return parser
 
 
@@ -198,13 +205,13 @@ def main(argv=None):
     model, priors_path = load_model(args.priors)
     games, source = fetch_games(start, args.days)
     rows = build_predictions(games, model, sim_sigma=params.sim_sigma(args.sigma_sim), sim_corr=args.sim_corr,
-                             pace=args.pace)
+                             pace=args.pace, home=args.home)
 
     SITE_DIR.mkdir(exist_ok=True)
     (SITE_DIR / "predictions.json").write_text(json.dumps(
         {"start": start.isoformat(), "end": end.isoformat(), "source": source,
          "model": Path(priors_path).name, "sigma_sim": args.sigma_sim, "sim_corr": args.sim_corr, "pace": args.pace,
-         "games": rows}, indent=2), encoding="utf-8")
+         "home": args.home, "games": rows}, indent=2), encoding="utf-8")
     (SITE_DIR / "index.html").write_text(render_page(rows, source, priors_path, start, end), encoding="utf-8")
     print(f"Wrote {len(rows)} games ({source}) to {SITE_DIR / 'index.html'}")
 

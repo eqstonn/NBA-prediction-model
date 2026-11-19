@@ -5,7 +5,8 @@ mode (update.py --replay) and code/compare.py.
 Run from the repo root:  python -m pytest tests
 
 Pipeline tests use the fake NBA.com and fake fit from tests/fake_nba.py (the `env`
-fixture is in conftest.py); every file goes to a temp folder.
+fixture is in conftest.py); every file goes to a temp folder. Replays start from
+update.START_PRIORS_PATH, the source --start-season (and so the env's season) uses.
 """
 import hashlib
 import json
@@ -19,6 +20,7 @@ import predlog  # noqa: E402
 from predict import predict_game  # noqa: E402
 
 FROZEN = update.FROZEN_PRIORS_PATH
+START = update.START_PRIORS_PATH
 
 
 def row(gid, home, away, winner, pct, proj_home, proj_away, actual_home, actual_away):
@@ -66,11 +68,15 @@ def test_brier_hand_computed_on_3_game_toy_log(tmp_path):
     errors = [-5, 6, 8]
     mean = sum(errors) / 3
     assert m["margin_sd"] == pytest.approx((sum((e - mean) ** 2 for e in errors) / 3) ** 0.5)
+    # home margins: projected 10, -4, 2; actual 5, 2, 10
+    assert m["proj_home_margin"] == pytest.approx((10 - 4 + 2) / 3)
+    assert m["actual_home_margin"] == pytest.approx((5 + 2 + 10) / 3)
 
 
 def test_metrics_of_empty_log():
     assert predlog.metrics([]) == {"games": 0, "accuracy": None, "confidence": None, "spread_mae": None, "brier": None,
-                                   "proj_total": None, "actual_total": None, "margin_sd": None}
+                                   "proj_total": None, "actual_total": None, "margin_sd": None,
+                                   "proj_home_margin": None, "actual_home_margin": None}
 
 
 def test_append_rows_never_duplicates(tmp_path):
@@ -86,7 +92,7 @@ def test_append_rows_never_duplicates(tmp_path):
 
 
 def test_prediction_is_reproducible_with_fixed_seed():
-    priors = update.reset_priors(json.loads(FROZEN.read_text(encoding="utf-8")))
+    priors = update.reset_priors(json.loads(START.read_text(encoding="utf-8")))
     a = predict_game("1610612765", "1610612738", priors, seed=predlog.PREDICT_SEED)
     b = predict_game("1610612765", "1610612738", priors, seed=predlog.PREDICT_SEED)
     c = predict_game("1610612765", "1610612738", priors, seed=predlog.PREDICT_SEED + 1)
@@ -184,12 +190,12 @@ def run_with_late_game(env):
 
 def replay_args(tmp_path, name="base"):
     out, log = tmp_path / f"priors_{name}.json", tmp_path / f"log_{name}.csv"
-    return ["--replay", "--from", str(FROZEN), "--out", str(out), "--log", str(log)], out, log
+    return ["--replay", "--from", str(START), "--out", str(out), "--log", str(log)], out, log
 
 
 def test_replay_writes_only_out_and_log(env, tmp_path):
     run_with_late_game(env)
-    watched = [update.PRIORS_PATH, update.APPLIED_GAMES_PATH, update.LOG_PATH, FROZEN]
+    watched = [update.PRIORS_PATH, update.APPLIED_GAMES_PATH, update.LOG_PATH, FROZEN, START]
     before = {p: sha(p) for p in watched}
     folder_before = sorted(p.name for p in update.PRIORS_PATH.parent.iterdir())
 
@@ -248,7 +254,7 @@ def test_replay_needs_no_network(env, tmp_path, monkeypatch):
     def offline(*args):
         raise AssertionError("replay went to the network")
 
-    for name in ("_download_game_log", "_download_schedule", "_download_box_score"):
+    for name in ("_download_game_log", "_download_schedule", "_download_box_score", "_download_advanced_box_score"):
         monkeypatch.setattr(update.boxscores, name, offline)
     args, out, log = replay_args(tmp_path)
     update.main(args)
@@ -259,7 +265,7 @@ def test_replay_needs_no_network(env, tmp_path, monkeypatch):
 def test_replay_refuses_to_overwrite_protected_files(env, tmp_path, target):
     update.run_update()
     paths = {"priors": update.PRIORS_PATH, "applied": update.APPLIED_GAMES_PATH,
-             "live-log": update.LOG_PATH, "from": FROZEN}
+             "live-log": update.LOG_PATH, "from": START}
     args, out, log = replay_args(tmp_path)
     flag, what = target.split("=")
     if what == "log":
@@ -268,7 +274,7 @@ def test_replay_refuses_to_overwrite_protected_files(env, tmp_path, target):
         out, log = (paths[what], log) if flag == "out" else (out, paths[what])
     before = {p: sha(p) for p in paths.values()}
     with pytest.raises(SystemExit):
-        update.main(["--replay", "--from", str(FROZEN), "--out", str(out), "--log", str(log)])
+        update.main(["--replay", "--from", str(START), "--out", str(out), "--log", str(log)])
     assert {p: sha(p) for p in paths.values()} == before
 
 

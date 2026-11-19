@@ -2,7 +2,8 @@
 TRAINING: run the Kaggle games through the Bayesian update, one row at a time, into a
 new priors file.
 
-    python code/dynamic_model.py --out priors_pre_2026-27_exact.json --before 2026-10-03
+    python code/dynamic_model.py --out x.json --before 2026-10-03     # the live defaults: paces + home boost
+    python code/dynamic_model.py --out x.json --before 2026-10-03 --pace off --home off   # = priors_pre_2026-27_sigma-update.json
     python code/dynamic_model.py --out x.json --before 2026-10-03 --years 5 --engine pymc
     python code/dynamic_model.py --out x.json --before 2026-10-03 --all-history
 
@@ -16,13 +17,19 @@ It reads stats/TeamStatisticsExtended.csv or stats/NBA-DataSet/TeamStatisticsExt
 --before and within --years of it (default 3, like the original training), starts every
 team from the flat league-average curves (state_manager.default_priors), applies every
 row oldest first with tau=0 (one row = one team's offense vs the opponent's defense),
-and writes --out. It never writes priors.json or the frozen priors_pre_2026-27.json.
+and writes --out. It never writes priors.json, the frozen priors_pre_2026-27.json or the
+live preseason priors_pre_2026-27_pace-home.json (--start-season's source).
 
---pace on (Phase 7) also trains each team's pace curve, priors[team]["pace"] = {"mean",
+--pace on (Phase 7, default) also trains each team's pace curve, priors[team]["pace"] = {"mean",
 "std"} in possessions per game: every team starts at model_params.json["pace"]
 (start_mean, start_std), then every game's possessions (the average of the two teams'
 "possessions" columns) updates both teams' paces with bayes_update.update_pace (tau=0).
 The factor training is unchanged, so the offense/defense curves are identical to --pace off.
+
+--home on (Phase 8, default) adds the home boost (model_params.json["home"]) to each row's expected
+value: the home team's offensive line gets "offense", the away team's "defense". Games at a
+neutral site (NBA.com's schedule, see boxscores.neutral_flags; the schedules of the training
+seasons are downloaded once into stats/schedules/) and games with a non-NBA team get none.
 """
 import argparse
 import json
@@ -33,8 +40,10 @@ from pathlib import Path
 
 # bayes_update sets PYTENSOR_FLAGS before pymc can be imported
 from bayes_update import DEFAULT_ENGINE, ENGINES, update_game, update_pace
+import boxscores
 from data_prep import create_data_frame, clean_data_frame, get_four_factors
 import params
+from schedule import NBA_TEAMS
 from state_manager import default_priors
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -43,8 +52,8 @@ CSV_LOCATIONS = [REPO_ROOT / "stats" / "TeamStatisticsExtended.csv",
 DEFAULT_CSV = next((p for p in CSV_LOCATIONS if p.exists()), CSV_LOCATIONS[0])
 # never written, even with --overwrite
 PROTECTED = [REPO_ROOT / name for name in
-             ("priors_pre_2026-27.json", "priors.json", "applied_games.json", "priors_2026-27_base.json",
-              "model_params.json")]
+             ("priors_pre_2026-27.json", "priors_pre_2026-27_pace-home.json", "priors.json", "applied_games.json",
+              "priors_2026-27_base.json", "model_params.json")]
 TRAINING_CUTOFF = "2026-10-03"   # first day of the 2026-27 preseason (see the module docstring)
 TRAINING_TAU = 0.0
 CHECKPOINT_EVERY = 50   # rows, pymc engine only
@@ -76,10 +85,15 @@ def write_priors(path, priors):
     os.replace(tmp, path)
 
 
-def train(four_factors, priors: dict, engine: str = DEFAULT_ENGINE, checkpoint=None, sigma=None) -> dict:
-    """Apply every row of `four_factors` (oldest first) to `priors` in place; returns `priors`."""
+def train(four_factors, priors: dict, engine: str = DEFAULT_ENGINE, checkpoint=None, sigma=None,
+          offsets=None) -> dict:
+    """
+    Apply every row of `four_factors` (oldest first) to `priors` in place; returns `priors`.
+    offsets: one {factor: shift} or None per row (the home boost, see row_offsets), or None.
+    """
     for count, (_, row) in enumerate(four_factors.iterrows(), 1):
-        update_game(priors, row_to_game(row), tau=TRAINING_TAU, engine=engine, sigma=sigma)
+        update_game(priors, row_to_game(row), tau=TRAINING_TAU, engine=engine, sigma=sigma,
+                    offset=None if offsets is None else offsets[count - 1])
         if checkpoint is not None and count % CHECKPOINT_EVERY == 0:
             checkpoint(priors, count)
     return priors
@@ -121,6 +135,29 @@ def load_training_rows(csv_path, before, years=3) -> dict:
             "possessions": game_possessions(cleaned), "cleaned": cleaned}
 
 
+def row_sides(data: dict) -> list:
+    """
+    Per training row (same order as data["rows"]): "home" when the row's team is the home
+    team, "away" when it is the away team, None at a neutral site or when a team isn't an
+    NBA team (All-Star games). Neutral flags: boxscores.neutral_games (NBA.com schedules).
+    """
+    cleaned = data["cleaned"]
+    if "home" not in cleaned.columns:
+        raise KeyError("the training data has no 'home' column, needed for --home on")
+    keys = [(boxscores.game_key(g), team_key(t), team_key(o), h)
+            for g, t, o, h in zip(cleaned["gameId"], cleaned["teamId"], cleaned["opponentTeamId"], cleaned["home"])]
+    nba = [t in NBA_TEAMS and o in NBA_TEAMS for _, t, o, _ in keys]
+    neutral = boxscores.neutral_games(sorted({k[0] for k, is_nba in zip(keys, nba) if is_nba}))
+    return [None if not is_nba or neutral[gid] else ("home" if int(home) == 1 else "away")
+            for (gid, _, _, home), is_nba in zip(keys, nba)]
+
+
+def row_offsets(sides: list, boost=None) -> list:
+    """The home boost per row: the "offense" shifts for a home line, "defense" for an away line, None otherwise."""
+    home_line, away_line = params.home_offsets("on", boost=boost)
+    return [home_line if s == "home" else away_line if s == "away" else None for s in sides]
+
+
 def start_pace(priors: dict, team_ids, start_mean: float, start_std: float) -> dict:
     """Give every team the flat starting pace curve; returns `priors`."""
     for team in team_ids:
@@ -145,16 +182,19 @@ def check_output(path, overwrite=False):
 
 def run_training(csv_path, out_path, before, years=3, engine: str = DEFAULT_ENGINE,
                  sigma_update: str = params.DEFAULT_UPDATE_SIGMA_MODE, overwrite: bool = False,
-                 pace: str = params.DEFAULT_PACE_MODE) -> dict:
+                 pace: str = params.DEFAULT_PACE_MODE, home: str = params.DEFAULT_HOME_MODE) -> dict:
     """
     Train from flat defaults on the games before `before` (and within `years` of it) into
-    `out_path`. pace="on" also trains every team's pace curve (see the module docstring).
+    `out_path`. pace="on" also trains every team's pace curve; home="on" adds the home
+    boost to each row's expected value (see the module docstring).
     """
     out_path = Path(out_path)
     check_output(out_path, overwrite)
     sigma = params.update_sigma(sigma_update)
     with_pace = params.is_on(pace, "pace")
     pace_params = params.pace_params() if with_pace else None
+    with_home = params.is_on(home, "home")
+    boost = params.home_boost() if with_home else None
 
     start = time.perf_counter()
     data = load_training_rows(csv_path, before, years)
@@ -168,7 +208,9 @@ def run_training(csv_path, out_path, before, years=3, engine: str = DEFAULT_ENGI
 
     if with_pace and not data["possessions"]:
         raise KeyError(f"--pace on needs a 'possessions' column in {Path(csv_path).name}")
-    train(four_factors, priors, engine, checkpoint if engine == "pymc" else None, sigma=sigma)
+    sides = row_sides(data) if with_home else None
+    offsets = row_offsets(sides, boost) if with_home else None
+    train(four_factors, priors, engine, checkpoint if engine == "pymc" else None, sigma=sigma, offsets=offsets)
     if with_pace:
         start_pace(priors, team_ids, pace_params["start_mean"], pace_params["start_std"])
         train_pace(data["possessions"], priors, pace_params["sigma"])
@@ -185,6 +227,11 @@ def run_training(csv_path, out_path, before, years=3, engine: str = DEFAULT_ENGI
     if with_pace:
         print(f"  + team paces from {summary['pace_games']} games (start {pace_params['start_mean']:.2f} "
               f"+- {pace_params['start_std']:.1f}, game noise {pace_params['sigma']:.2f} possessions)")
+    if with_home:
+        summary["home_rows"] = sum(s is not None for s in sides)
+        summary["neutral_or_non_nba_rows"] = sum(s is None for s in sides)
+        print(f"  + home boost on {summary['home_rows']} rows; none on {summary['neutral_or_non_nba_rows']} rows "
+              f"(neutral sites, All-Star games)")
     return summary
 
 
@@ -202,6 +249,9 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--pace", choices=params.SWITCH_MODES, default=params.DEFAULT_PACE_MODE,
                         help="also train each team's pace (possessions per game); "
                              f"default {params.DEFAULT_PACE_MODE}")
+    parser.add_argument("--home", choices=params.SWITCH_MODES, default=params.DEFAULT_HOME_MODE,
+                        help="add the fitted home-court boost to each row's expected value (none at neutral "
+                             f"sites); default {params.DEFAULT_HOME_MODE}")
     parser.add_argument("--overwrite", action="store_true", help="allow replacing an existing --out file")
     parser.add_argument("--csv", default=str(DEFAULT_CSV), help="Kaggle TeamStatisticsExtended.csv")
     return parser
@@ -221,7 +271,7 @@ def main(argv=None):
         parser.error(f"{args.csv} not found (download the Kaggle CSV into stats/)")
     try:
         run_training(args.csv, args.out, before, years=None if args.all_history else args.years, engine=args.engine,
-                     sigma_update=args.sigma_update, overwrite=args.overwrite, pace=args.pace)
+                     sigma_update=args.sigma_update, overwrite=args.overwrite, pace=args.pace, home=args.home)
     except (PermissionError, FileExistsError, KeyError) as err:
         parser.error(str(err))
 

@@ -13,6 +13,7 @@ Every game comes back in the same shape:
         "status_text": str,
         "home": {"id": "1610612738", "abbr": "BOS", "name": "Boston Celtics", "score": int | None},
         "away": {...same...},
+        "neutral": bool,               # neutral site (NBA.com isNeutral / ESPN neutralSite)
     }
 """
 from datetime import date, datetime, timedelta
@@ -97,6 +98,7 @@ def fetch_from_nba(start: date, end: date):
                 "status_text": g.get("gameStatusText", ""),
                 "home": _team(home["teamId"], home.get("score"), status),
                 "away": _team(away["teamId"], away.get("score"), status),
+                "neutral": bool(g.get("isNeutral")),
             })
     return games
 
@@ -128,6 +130,7 @@ def fetch_from_espn(start: date, end: date):
                 "status_text": comp["status"]["type"].get("shortDetail", ""),
                 "home": sides["home"],
                 "away": sides["away"],
+                "neutral": bool(comp.get("neutralSite")),
             })
         day += timedelta(days=1)
     return games

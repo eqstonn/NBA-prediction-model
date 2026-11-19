@@ -19,6 +19,7 @@ Metrics
   margin error SD   SD of (actual_home - actual_away) - (proj_home - proj_away): how far real
                     margins land from the projection. A well-calibrated simulation's own
                     margin SD (simulation.py "margin_sd") matches it.
+  home margin       mean proj_home - proj_away (projected) and actual_home - actual_away (actual)
 """
 import statistics
 import csv
@@ -78,7 +79,8 @@ def append_rows(path, rows) -> int:
     return len(new)
 
 
-METRIC_KEYS = ("accuracy", "confidence", "spread_mae", "brier", "proj_total", "actual_total", "margin_sd")
+METRIC_KEYS = ("accuracy", "confidence", "spread_mae", "brier", "proj_total", "actual_total", "margin_sd",
+               "proj_home_margin", "actual_home_margin")
 
 
 def metrics(rows) -> dict:
@@ -87,7 +89,7 @@ def metrics(rows) -> dict:
         return {"games": 0, **{k: None for k in METRIC_KEYS}}
     correct, spread_errors, brier = 0, [], []
     confidence = 0.0
-    proj_totals, actual_totals, margin_errors = [], [], []
+    proj_totals, actual_totals, margin_errors, proj_margins, actual_margins = [], [], [], [], []
     for r in rows:
         actual_home, actual_away = int(r["actual_home"]), int(r["actual_away"])
         actual_winner = r["home"] if actual_home > actual_away else r["away"]
@@ -100,11 +102,14 @@ def metrics(rows) -> dict:
         proj_totals.append(float(r["proj_home"]) + float(r["proj_away"]))
         actual_totals.append(actual_home + actual_away)
         margin_errors.append((actual_home - actual_away) - projected)
+        proj_margins.append(projected)
+        actual_margins.append(actual_home - actual_away)
     n = len(rows)
     return {"games": n, "accuracy": correct / n, "confidence": confidence / n,
             "spread_mae": sum(spread_errors) / n, "brier": sum(brier) / n,
             "proj_total": sum(proj_totals) / n, "actual_total": sum(actual_totals) / n,
-            "margin_sd": statistics.pstdev(margin_errors)}
+            "margin_sd": statistics.pstdev(margin_errors),
+            "proj_home_margin": sum(proj_margins) / n, "actual_home_margin": sum(actual_margins) / n}
 
 
 def format_metrics(m: dict) -> str:

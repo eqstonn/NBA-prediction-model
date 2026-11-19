@@ -36,6 +36,18 @@ its own possession count, so simple formulas are off by up to ~0.05.
 Complete box scores are cached in stats/boxscores/<gameId>.json, so reruns don't
 download them again. Every request is retried with backoff (2 s, 4 s, 8 s).
 
+Neutral sites
+-------------
+For the home-court boost (Phase 8) every game carries "neutral": True when it is played at
+a neutral site. The flag comes from NBA.com's season schedule (ScheduleLeagueV2), cached in
+stats/schedules/<season>.json (refreshed by every --update run):
+  * the schedule's own "isNeutral" flag (set from 2024-25 on: Mexico City, Paris, Berlin,
+    London, Manchester, the NBA Cup semifinals and final), or
+  * the game's arena is in a different state/country than the home team's usual arena.
+    This catches 2023-24, whose schedule never sets isNeutral (Mexico City, Paris, the Las
+    Vegas Cup semifinals and final), and agrees with isNeutral in every later season. The
+    Spurs' games in Austin (same state) stay home games, as NBA.com has them.
+
 Possessions
 -----------
 For pace (Phase 7), get_game_possessions reads each team's "possessions" from NBA.com's
@@ -52,11 +64,13 @@ A game with its factors looks like:
                  "eFG": 0.541, "TOV": 0.168, "ORB": 0.354, "FTR": 0.372},   # that team's OFFENSE
         "away": {...same...},
         "winner": "1610612765",
+        "neutral": False,               # played at a neutral site (see below)
     }
 """
 import json
 import os
 import time
+from collections import Counter
 from pathlib import Path
 
 from nba_api.stats.endpoints import boxscoreadvancedv3, boxscorefourfactorsv3, leaguegamelog, scheduleleaguev2
@@ -64,6 +78,7 @@ from nba_api.stats.endpoints import boxscoreadvancedv3, boxscorefourfactorsv3, l
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CACHE_DIR = REPO_ROOT / "stats" / "boxscores"
 ADVANCED_CACHE_DIR = REPO_ROOT / "stats" / "boxscores_advanced"
+SCHEDULE_CACHE_DIR = REPO_ROOT / "stats" / "schedules"
 
 SEASON = "2026-27"
 OPENING_NIGHT = "2026-10-20"
@@ -225,14 +240,88 @@ def fetch_finished_games(season: str = SEASON, disagreements=None) -> list:
                 log_games[game["game_id"]]["season_types"].append(season_type)
             else:
                 log_games[game["game_id"]] = game
-    schedule_games = _games_from_schedule(with_retries(_download_schedule, season, what="season schedule"))
+    raw_schedule = get_schedule(season, refresh=True)
+    schedule_games = _games_from_schedule(raw_schedule)
 
     games, problems = combine_game_lists(list(log_games.values()), schedule_games)
+    flags = neutral_flags(raw_schedule)
+    for g in games:
+        g["neutral"] = flags.get(g["game_id"], False)
     for problem in problems:
         print(f"  WARNING: {problem}")
     if disagreements is not None:
         disagreements.extend(problems)
     return games
+
+
+# ---------------------------------------------------------------------------
+# season schedules (cached) and neutral sites
+# ---------------------------------------------------------------------------
+
+def get_schedule(season: str, refresh: bool = False) -> dict:
+    """NBA.com's ScheduleLeagueV2 for a season, from stats/schedules/<season>.json unless refresh (then re-cached)."""
+    path = Path(SCHEDULE_CACHE_DIR) / f"{season}.json"
+    if path.exists() and not refresh:
+        return json.loads(path.read_text(encoding="utf-8"))
+    raw = with_retries(_download_schedule, season, what=f"{season} season schedule")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(raw), encoding="utf-8")
+    os.replace(tmp, path)
+    return raw
+
+
+def neutral_flags(raw: dict) -> dict:
+    """
+    {gameId: True/False} for every game in a ScheduleLeagueV2 response: neutral when
+    isNeutral is set, or when the arena's state/country differs from the home team's usual
+    one (its most common arenaState over its regular-season, play-in and playoff home games).
+    """
+    games = [g for day in raw["leagueSchedule"]["gameDates"] for g in day["games"]]
+    usual = {}
+    for g in games:
+        team = (g.get("homeTeam") or {}).get("teamId")
+        if team and g["gameId"][:3] in ("002", "004", "005"):
+            usual.setdefault(team, Counter())[g.get("arenaState")] += 1
+    usual = {team: states.most_common(1)[0][0] for team, states in usual.items()}
+    flags = {}
+    for g in games:
+        team = (g.get("homeTeam") or {}).get("teamId")
+        away_from_home = team in usual and g.get("arenaState") != usual[team]
+        flags[g["gameId"]] = bool(g.get("isNeutral")) or away_from_home
+    return flags
+
+
+def game_key(game_id) -> str:
+    """A 10-digit NBA.com gameId string from Kaggle's integer ids (22300172 -> "0022300172")."""
+    return str(int(game_id)).zfill(10)
+
+
+def season_of(game_id) -> str:
+    """The season a gameId belongs to: "0022300172" -> "2023-24" (digits 4-5 are the season's first year)."""
+    year = 2000 + int(game_key(game_id)[3:5])
+    return f"{year}-{str(year + 1)[2:]}"
+
+
+def neutral_games(game_ids) -> dict:
+    """
+    {gameId: neutral?} for the given games, from the cached schedules of their seasons. A
+    season whose cache is missing, or lacks one of the games, is downloaded once (and
+    cached); a game that still isn't in its schedule raises KeyError.
+    """
+    by_season = {}
+    for gid in game_ids:
+        by_season.setdefault(season_of(gid), []).append(game_key(gid))
+    out = {}
+    for season, ids in by_season.items():
+        flags = neutral_flags(get_schedule(season))
+        if any(gid not in flags for gid in ids):
+            flags = neutral_flags(get_schedule(season, refresh=True))
+        missing = [gid for gid in ids if gid not in flags]
+        if missing:
+            raise KeyError(f"games not in NBA.com's {season} schedule: {missing[:5]}")
+        out.update({gid: flags[gid] for gid in ids})
+    return out
 
 
 def select_games(games: list, opening_night: str = OPENING_NIGHT, through=None) -> list:

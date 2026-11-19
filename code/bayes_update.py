@@ -127,7 +127,7 @@ def _fit(prior: dict, observed: dict, random_seed=None, engine: str = DEFAULT_EN
 
 
 def update_game(priors: dict, game: dict, tau: float = 0.0, random_seed=None, engine: str = DEFAULT_ENGINE,
-                sigma=None) -> dict:
+                sigma=None, offset=None) -> dict:
     """
     Update `priors` in place from one team's offensive line in one game; returns `priors`.
 
@@ -135,6 +135,8 @@ def update_game(priors: dict, game: dict, tau: float = 0.0, random_seed=None, en
     sqrt(std^2 + tau^2) before fitting. Over a full game (one call per side) that widens
     each of the two teams' 8 curves exactly once. tau = 0 is the training update.
     random_seed only matters for the pymc engine. sigma: {factor: noise}, default fitted.
+    offset: {factor: shift} added to the expected value, y ~ N((o + d)/2 + offset, sigma^2)
+    (the home-court boost, Phase 8); fitted as the observation y - offset. None = no shift.
     """
     team, opponent = str(game["team"]), str(game["opponent"])
     offense = priors[team]["offense"]
@@ -144,7 +146,10 @@ def update_game(priors: dict, game: dict, tau: float = 0.0, random_seed=None, en
         "o": {f: (offense[f]["mean"], widen(offense[f]["std"], tau) if tau else offense[f]["std"]) for f in FACTORS},
         "d": {f: (defense[f]["mean"], widen(defense[f]["std"], tau) if tau else defense[f]["std"]) for f in FACTORS},
     }
-    posterior = _fit(prior, {f: game[f] for f in FACTORS}, random_seed, engine=engine, sigma=sigma)
+    observed = {f: game[f] for f in FACTORS}
+    if offset is not None:
+        observed = {f: observed[f] - offset[f] for f in FACTORS}
+    posterior = _fit(prior, observed, random_seed, engine=engine, sigma=sigma)
 
     # only written once the fit succeeded, so a failed fit leaves priors untouched
     for f in FACTORS:
