@@ -4,11 +4,12 @@ Build the predictions website for this week's NBA games.
     python code/build_site.py                 # today + next 6 days
     python code/build_site.py --start 2026-11-16 --days 7
     python code/build_site.py --priors other_priors.json
-    Defaults = the live model (params.py): fitted sim sigma, --pace on, --sim-corr off, --home on;
-    needs priors with team paces (priors.json has them).
-    python code/build_site.py --sigma-sim legacy --pace off --home off   # the previous live simulation
+    Defaults = the live model (params.py): fitted sim sigma, --pace on, --sim-corr off, --home on,
+    --rest on; needs priors with team paces (priors.json has them) and each team's rest, taken
+    from NBA.com's season schedule (the stats/schedules/ cache, downloaded if missing).
+    python code/build_site.py --rest off --priors priors_2026-27_pace-home.json   # the previous live model
+    python code/build_site.py --sigma-sim legacy --pace off --home off --rest off  # the Phase 6 simulation
     python code/build_site.py --sim-corr on                              # Phase 7 correlated factors
-    python code/build_site.py --rest on --priors <priors trained with --rest on>   # Phase 9 rest (default off)
 
 Writes site/index.html (open it in a browser) and site/predictions.json.
 """

@@ -5,7 +5,7 @@ Tests for the per-factor game noise sigma (code/params.py, code/fit_sigma.py):
   - the update and the simulation take their sigma separately (--sigma-update / --sigma-sim),
     with default fitted for both everywhere (the live pace-home model; Phase 6 had legacy sim)
   - legacy for both (pace and home off) reproduces the pre-Phase-6 results exactly
-The noise-scale spies use pace="off", home="off" (the toy priors have no paces).
+The noise-scale spies use pace, home and rest off (the toy priors have no paces).
   - the estimator recovers a known sigma
 
 Run from the repo root:  python -m pytest tests
@@ -108,7 +108,7 @@ def test_fitted_sigma_is_read_from_model_params(custom_params, sim_scales):
     assert params.update_sigma("fitted") == params.sim_sigma("fitted") == custom_params
     assert update_uses(custom_params)                                   # update default = fitted
     simulation.simulate_factors("HOME", "AWAY", toy_priors(), seed=1, sigma=params.sim_sigma("fitted"), pace="off",
-                                home="off")
+                                home="off", rest="off")
     assert sim_scales == [custom_params[f] for f in FACTORS] * 2
 
 
@@ -117,7 +117,7 @@ def test_legacy_values_are_the_old_model(sim_scales):
     assert params.sim_sigma("legacy") == {"eFG": 0.05, "TOV": 0.02, "ORB": 0.05, "FTR": 0.02}
     assert update_uses({f: 0.05 for f in FACTORS}, sigma=params.update_sigma("legacy"))
     simulation.simulate_factors("HOME", "AWAY", toy_priors(), seed=1, sigma=params.sim_sigma("legacy"), pace="off",
-                                home="off")
+                                home="off", rest="off")
     assert sim_scales == LEGACY_SIM
 
 
@@ -145,15 +145,15 @@ def with_paces(priors):
 def test_simulation_predict_and_site_default_to_fitted(sim_scales):
     """Default game noise: fitted per factor for both lines, then the pace noise (pace is on by default)."""
     fitted_then_pace = [FITTED[f] for f in FACTORS] * 2 + [params.pace_sigma()]
-    simulation.simulate_factors("HOME", "AWAY", with_paces(toy_priors()), seed=1)
+    simulation.simulate_factors("HOME", "AWAY", with_paces(toy_priors()), seed=1, rest_a="b2b", rest_b="2+")
     assert sim_scales == fitted_then_pace
     sim_scales.clear()
-    predict.predict_game("HOME", "AWAY", with_paces(toy_priors()), seed=1)
+    predict.predict_game("HOME", "AWAY", with_paces(toy_priors()), seed=1, rest_home="b2b", rest_away="2+")
     assert sim_scales == fitted_then_pace
     sim_scales.clear()
-    build_site.build_predictions([{"home": {"id": "HOME", "abbr": "H", "score": None},
+    build_site.build_predictions([{"date": "2026-11-20", "home": {"id": "HOME", "abbr": "H", "score": None},
                                    "away": {"id": "AWAY", "abbr": "A", "score": None}, "status": "scheduled"}],
-                                 with_paces(toy_priors()))
+                                 with_paces(toy_priors()), rest_lookup=lambda team, day: {"rest": "2+"})
     assert sim_scales == fitted_then_pace
 
 
@@ -248,7 +248,7 @@ def test_legacy_replay_reproduces_log_exact(tmp_path):
     out, log = tmp_path / "priors.json", tmp_path / "log.csv"
     update.main(["--replay", "--from", str(REPO_ROOT / "priors_pre_2026-27_exact.json"), "--out", str(out),
                  "--log", str(log), "--n", "20", "--m", "30", "--sigma-update", "legacy", "--sigma-sim", "legacy",
-                 "--pace", "off", "--home", "off"])
+                 "--pace", "off", "--home", "off", "--rest", "off"])
     assert log.read_text(encoding="utf-8").splitlines() == \
         (REPO_ROOT / "log_exact.csv").read_text(encoding="utf-8").splitlines()
     assert json.loads(out.read_text(encoding="utf-8")) == \
@@ -259,7 +259,7 @@ def test_legacy_replay_reproduces_log_exact(tmp_path):
 def test_phase6_replay_reproduces_log_sigma_update(tmp_path):
     out, log = tmp_path / "priors.json", tmp_path / "log.csv"
     update.main(["--replay", "--from", str(REPO_ROOT / "priors_pre_2026-27_sigma-update.json"), "--out", str(out),
-                 "--log", str(log), "--n", "20", "--m", "30", "--sigma-sim", "legacy", "--pace", "off", "--home", "off"])
+                 "--log", str(log), "--n", "20", "--m", "30", "--sigma-sim", "legacy", "--pace", "off", "--home", "off", "--rest", "off"])
     assert log.read_text(encoding="utf-8").splitlines() == \
         (REPO_ROOT / "log_sigma-update.csv").read_text(encoding="utf-8").splitlines()
 
@@ -268,7 +268,7 @@ def test_phase6_replay_reproduces_log_sigma_update(tmp_path):
 def test_legacy_training_reproduces_priors_pre_exact(tmp_path):
     out = tmp_path / "trained.json"
     dynamic_model.main(["--out", str(out), "--before", "2026-10-03", "--sigma-update", "legacy", "--pace", "off",
-                        "--home", "off"])
+                        "--home", "off", "--rest", "off"])
     assert json.loads(out.read_text(encoding="utf-8")) == \
         json.loads((REPO_ROOT / "priors_pre_2026-27_exact.json").read_text(encoding="utf-8"))
 

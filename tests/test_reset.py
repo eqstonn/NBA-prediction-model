@@ -22,7 +22,8 @@ import update  # noqa: E402
 from schedule import NBA_TEAMS  # noqa: E402
 
 FROZEN = REPO_ROOT / "priors_pre_2026-27.json"
-SOURCE = REPO_ROOT / "priors_pre_2026-27_pace-home.json"   # --start-season's default source
+SOURCE = REPO_ROOT / "priors_pre_2026-27_pace-home-rest.json"   # --start-season's default source
+PACE_HOME = REPO_ROOT / "priors_pre_2026-27_pace-home.json"       # the previous one, also read-only
 
 
 def sha256(path):
@@ -110,14 +111,15 @@ def test_reset_from_the_frozen_snapshot(out, frozen):
 
 
 def test_source_files_hash_unchanged(out):
-    before = (sha256(FROZEN), sha256(SOURCE))
+    before = (sha256(FROZEN), sha256(SOURCE), sha256(PACE_HOME))
     update.start_season()
     update.main(["--start-season", "--n", "10"])
     update.main(["--start-season", "--from", str(FROZEN), "--pace", "off"])
-    assert (sha256(FROZEN), sha256(SOURCE)) == before
+    update.main(["--start-season", "--from", str(PACE_HOME)])
+    assert (sha256(FROZEN), sha256(SOURCE), sha256(PACE_HOME)) == before
 
 
-@pytest.mark.parametrize("path", [FROZEN, SOURCE])
+@pytest.mark.parametrize("path", [FROZEN, SOURCE, PACE_HOME])
 def test_writing_a_preseason_file_is_refused(path):
     before = sha256(path)
     with pytest.raises(PermissionError):

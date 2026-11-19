@@ -8,8 +8,8 @@ build_site.py / train_calibration.py):
   - on the real data: the schedules' rest agrees with the Kaggle dates for every training row
   - the fit recovers a known rest effect from simulated games, and its linear shortcut is exact
   - the effect enters the expected value in the update and the simulation, only with rest on
-  - --rest off reproduces log_pace-home.csv and the live priors exactly; --rest on reproduces
-    the Phase 9 training, replay and log
+  - --rest off reproduces the pace-home model (log_pace-home.csv) exactly; --rest on (the
+    default since the rest switch) reproduces the Phase 9 training, replay and log
   - nothing writes priors.json, applied_games.json or an existing priors/log file
 
 Run from the repo root:  python -m pytest tests
@@ -365,7 +365,7 @@ def test_simulation_moves_the_margin_toward_the_rested_team(rest_params):
     priors = live_priors()
     h, a = GAMES[0]["home"]["id"], GAMES[0]["away"]["id"]
     margin = lambda r: r["team_a_avg_score"] - r["team_b_avg_score"]   # noqa: E731
-    off = simulation.simulate_factors(h, a, priors, seed=3)
+    off = simulation.simulate_factors(h, a, priors, seed=3, rest="off")
     tired_away = simulation.simulate_factors(h, a, priors, seed=3, rest="on", rest_a="2+", rest_b="b2b")
     tired_home = simulation.simulate_factors(h, a, priors, seed=3, rest="on", rest_a="b2b", rest_b="2+")
     assert margin(tired_away) > margin(off) + 2 and margin(tired_home) < margin(off) - 2
@@ -386,23 +386,23 @@ def test_site_uses_the_schedule_lookup(rest_params):
     tired = {h["id"]: "2+", a["id"]: "b2b"}
     rows = build_site.build_predictions([game], priors, rest="on", rest_lookup=lambda t, d: {"rest": tired[t]})
     assert rows[0]["rest"] == {"home": "2+", "away": "b2b"}
-    plain = build_site.build_predictions([game], priors)
+    plain = build_site.build_predictions([game], priors, rest="off")
     assert "rest" not in plain[0]
     with pytest.raises(ValueError):
-        build_site.build_predictions([game], priors, rest="on")
+        build_site.build_predictions([game], priors)              # rest is on by default: it needs the lookup
 
 
-def test_rest_defaults_off_everywhere():
-    assert params.DEFAULT_REST_MODE == "off"
-    assert update.make_parser().parse_args([]).rest == "off"
-    assert dynamic_model.make_parser().parse_args(["--out", "x.json", "--before", "2026-10-03"]).rest == "off"
-    assert build_site.make_parser().parse_args([]).rest == "off"
+def test_rest_defaults_on_everywhere():
+    assert params.DEFAULT_REST_MODE == "on"
+    assert update.make_parser().parse_args([]).rest == "on"
+    assert dynamic_model.make_parser().parse_args(["--out", "x.json", "--before", "2026-10-03"]).rest == "on"
+    assert build_site.make_parser().parse_args([]).rest == "on"
     import inspect
     for fn in (update.apply_game, update.run_update, update.replay, update.trial, update.log_prediction,
                dynamic_model.run_training, simulation.simulate_factors, predict.predict_game,
                build_site.build_predictions, train_calibration.run_pass):
-        assert inspect.signature(fn).parameters["rest"].default == "off", fn.__name__
-    assert inspect.signature(update.record_game).parameters["rest_mode"].default == "off"
+        assert inspect.signature(fn).parameters["rest"].default == "on", fn.__name__
+    assert inspect.signature(update.record_game).parameters["rest_mode"].default == "on"
     for argv in (["--update", "--rest", "yes"], ["--replay", "--rest", "1"]):
         with pytest.raises(SystemExit):
             update.main(argv)
@@ -456,7 +456,8 @@ def test_replay_with_rest_reads_only_the_cached_schedule(env, b2b_season, tmp_pa
     out, log = tmp_path / "on.json", tmp_path / "on.csv"
     update.main(["--replay", "--from", str(PRE), "--out", str(out), "--log", str(log), "--rest", "on"])
     assert [r["game_id"] for r in predlog.read_log(log)] == b2b_season
-    update.main(["--replay", "--from", str(PRE), "--out", str(tmp_path / "off.json"), "--log", str(tmp_path / "off.csv")])
+    update.main(["--replay", "--from", str(PRE), "--out", str(tmp_path / "off.json"), "--log", str(tmp_path / "off.csv"),
+                 "--rest", "off"])
     assert load(out) != load(tmp_path / "off.json")
 
 
@@ -473,16 +474,13 @@ SEASON_CACHES = caches("boxscores", "boxscores_advanced") and (SCHEDULES / "2026
 
 
 @pytest.mark.skipif(not SEASON_CACHES, reason="needs the box-score caches and the cached 2026-27 schedule")
-def test_rest_off_reproduces_the_live_model(tmp_path):
+def test_rest_off_reproduces_the_pace_home_model(tmp_path):
     before = repo_data_hashes()
     out, log = tmp_path / "priors.json", tmp_path / "log.csv"
     update.main(["--replay", "--from", str(PRE), "--out", str(out), "--log", str(log), "--n", "20", "--m", "30",
                  "--rest", "off"])
     assert sha(log) == sha(REPO_ROOT / "log_pace-home.csv")
     assert load(out) == load(REPO_ROOT / "priors_2026-27_pace-home.json")
-    applied = load(REPO_ROOT / "applied_games.json")
-    if len(applied) == 210:      # until the next --update, the live priors are this replay
-        assert load(out) == load(REPO_ROOT / "priors.json")
     assert repo_data_hashes() == before
 
 
@@ -549,7 +547,7 @@ def test_rest_replay_never_overwrites_existing_files(env, tmp_path, target):
 
 
 @pytest.mark.parametrize("name", ["priors.json", "applied_games.json", "model_params.json", "priors_pre_2026-27.json",
-                                  "priors_pre_2026-27_pace-home.json"])
+                                  "priors_pre_2026-27_pace-home.json", "priors_pre_2026-27_pace-home-rest.json"])
 def test_rest_training_refuses_protected_outputs(name):
     before = repo_data_hashes()
     with pytest.raises(SystemExit):

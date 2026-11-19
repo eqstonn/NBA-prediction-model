@@ -14,10 +14,12 @@ vs 15.5 real); legacy sim sigma was the better match there (Phase 6, log_sigma-u
 With pace on, the corrected formula gets the scale right and the fitted sigma calibrates.
 Legacy for both + every switch off reproduces log_exact.csv exactly.
 
-LIVE DEFAULTS (pace-home): exact engine, sigma update fitted, sigma sim fitted, pace on,
-sim_corr off, home on. Picked on the training data (train_calibration.py: Brier 0.2264 vs
-0.2346 for the old live simulation, 5.5 paired SE); log_pace-home.csv is its 2026-27 replay.
-The old live model (Phase 6) is --sigma-sim legacy --pace off --home off.
+LIVE DEFAULTS (pace-home-rest): exact engine, sigma update fitted, sigma sim fitted, pace on,
+sim_corr off, home on, rest on. pace-home was picked on the training data (train_calibration.py:
+Brier 0.2264 vs 0.2346 for the old live simulation, 5.5 paired SE); rest on top of it gives
+0.2255 (-1.6 SE) and -0.0007 Brier on 2026-27 (-0.4 SE). log_pace-home-rest.csv is the live
+model's 2026-27 replay. The previous live model (pace-home) is --rest off (log_pace-home.csv);
+the Phase 6 one is --sigma-sim legacy --pace off --home off --rest off.
 
 Simulation switches (Phase 7), each "on" or "off" (off = the old simulation):
 
@@ -39,7 +41,7 @@ Home court (Phase 8), "on" or "off", default "on":
             allows) gets home["defense"][f]. Neutral-site games get nothing.
             code/fit_home.py estimates it from the training data only.
 
-Rest (Phase 9), "on" or "off", default "off" (not live):
+Rest (Phase 9), "on" or "off", default "on" (live since the rest switch):
 
   rest      add model_params.json["rest"] to the expected value of each line in the update
             and the simulation, from both teams' rest (rest.py: "b2b", "1", "2+"): a line
@@ -67,7 +69,7 @@ SWITCH_MODES = ("on", "off")
 DEFAULT_SIM_CORR_MODE = "off"
 DEFAULT_PACE_MODE = "on"
 DEFAULT_HOME_MODE = "on"
-DEFAULT_REST_MODE = "off"
+DEFAULT_REST_MODE = "on"
 REST_CATEGORIES = ("b2b", "1", "2+")   # rest.CATEGORIES; "2+" is the baseline (no shift)
 # rows/columns of the factor correlation: the team's offensive line, then the opponent's
 CORR_LABELS = tuple(f"team {f}" for f in FACTORS) + tuple(f"opponent {f}" for f in FACTORS)

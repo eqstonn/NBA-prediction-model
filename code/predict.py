@@ -36,7 +36,7 @@ def predict_game(home_id: str, away_id: str, model: dict, seed=None, sigma=None,
     `sigma` overrides the simulation's game noise (default params.sim_sigma(): fitted);
     sim_corr / pace / home: "on" or "off" (defaults in params.py: sim_corr off, pace on,
     home on; see simulation.py). pace on needs team paces in `model`. neutral=True:
-    a neutral-site game, no home boost. rest="on" (default off): rest_home / rest_away are
+    a neutral-site game, no home boost. rest="on" (the default): rest_home / rest_away are
     the teams' rest ("b2b", "1", "2+"; rest.py).
     """
     if home_id not in model or away_id not in model:

@@ -8,7 +8,7 @@ and code/train_calibration.py:
     neutral-site games get none (training, --update, --replay, the simulation, the site)
   - the neutral-site rule on NBA.com's schedule
   - --home off reproduces the Phase 6 log exactly; --home on reproduces log_home.csv
-These tests use priors without paces, so they pass pace="off"; the live defaults (pace and
+These tests use priors without paces, so they pass pace="off", rest="off"; the live defaults (pace and
 home on) are tested in test_live.py.
   - nothing writes priors.json, applied_games.json or an existing priors/log file
 
@@ -212,9 +212,9 @@ def test_update_adds_the_offset_to_the_expected_value():
 
 def test_apply_game_boosts_both_lines_but_not_at_neutral_sites(home_params):
     game = {**GAMES[0], "neutral": False}
-    off = update.apply_game(season_priors(), game, pace="off", home="off")
-    on = update.apply_game(season_priors(), game, pace="off", home="on")
-    neutral = update.apply_game(season_priors(), {**game, "neutral": True}, pace="off", home="on")
+    off = update.apply_game(season_priors(), game, pace="off", rest="off", home="off")
+    on = update.apply_game(season_priors(), game, pace="off", rest="off", home="on")
+    neutral = update.apply_game(season_priors(), {**game, "neutral": True}, pace="off", rest="off", home="on")
     assert neutral == off and on != off
     expected = season_priors()
     tau = update.season_tau(update.DEFAULT_M)
@@ -223,15 +223,15 @@ def test_apply_game_boosts_both_lines_but_not_at_neutral_sites(home_params):
         bayes_update.update_game(expected, row, tau=tau, offset=offset)
     assert on == expected
     with pytest.raises(KeyError, match="neutral"):
-        update.apply_game(season_priors(), GAMES[0], pace="off", home="on")   # home on needs the flag
+        update.apply_game(season_priors(), GAMES[0], pace="off", rest="off", home="on")   # home on needs the flag
 
 
 def test_simulation_boosts_the_home_team_but_not_at_neutral_sites(home_params):
     priors = season_priors()
     h, a = GAMES[0]["home"]["id"], GAMES[0]["away"]["id"]
-    off = simulation.simulate_factors(h, a, priors, seed=3, pace="off", home="off")
-    on = simulation.simulate_factors(h, a, priors, seed=3, pace="off", home="on")
-    neutral = simulation.simulate_factors(h, a, priors, seed=3, pace="off", home="on", neutral=True)
+    off = simulation.simulate_factors(h, a, priors, seed=3, pace="off", rest="off", home="off")
+    on = simulation.simulate_factors(h, a, priors, seed=3, pace="off", rest="off", home="on")
+    neutral = simulation.simulate_factors(h, a, priors, seed=3, pace="off", rest="off", home="on", neutral=True)
     assert neutral == off
     margin = lambda r: r["team_a_avg_score"] - r["team_b_avg_score"]   # noqa: E731
     assert margin(on) > margin(off) + 1.5
@@ -261,7 +261,7 @@ def test_site_passes_the_neutral_flag(home_params, monkeypatch):
     seen = []
     real = build_site.predict_game
     monkeypatch.setattr(build_site, "predict_game", lambda *args, **kw: seen.append(kw) or real(*args, **kw))
-    build_site.build_predictions([{**game, "neutral": True}, {**game, "neutral": False}], priors, pace="off",
+    build_site.build_predictions([{**game, "neutral": True}, {**game, "neutral": False}], priors, pace="off", rest="off",
                                  home="on")
     assert [(kw["home"], kw["neutral"]) for kw in seen] == [("on", True), ("on", False)]
 
@@ -293,9 +293,9 @@ def test_training_adds_the_boost_except_at_neutral_sites(home_params, tmp_path, 
     monkeypatch.setattr(boxscores, "_download_schedule", lambda season: schedule(
         [(g["game_id"], g["home"]["id"], g["away"]["id"], "XX", g["game_id"] == neutral_id) for _, g in dated]))
     dynamic_model.main(["--csv", str(csv), "--out", str(out_on), "--before", "2026-10-20", "--home", "on",
-                        "--pace", "off"])
+                        "--pace", "off", "--rest", "off"])
     dynamic_model.main(["--csv", str(csv), "--out", str(out_off), "--before", "2026-10-20", "--home", "off",
-                        "--pace", "off"])
+                        "--pace", "off", "--rest", "off"])
 
     teams = sorted({g[side]["id"] for _, g in dated for side in ("home", "away")})
     expected = default_priors(teams)
@@ -332,7 +332,7 @@ def raw_factors(game_id):
 
 def test_update_run_home_on_skips_the_boost_at_neutral_sites(env, fits, home_params):
     env.nba.neutral.add("0022600015")
-    result = update.run_update(home="on", pace="off")
+    result = update.run_update(home="on", pace="off", rest="off")
     assert result["applied"] == EXPECTED
     applied = env.applied()
     assert {gid for gid, e in applied.items() if e["neutral"]} == {"0022600015"}
@@ -353,15 +353,15 @@ def test_update_run_home_off_uses_no_offset(env, fits):
 
 def test_replay_home_on_reads_cached_schedule_and_home_off_never_does(env, home_params, tmp_path, monkeypatch):
     env.nba.neutral.add("0022600015")
-    update.run_update(pace="off")                        # caches the schedule in the temp folder
+    update.run_update(pace="off", rest="off")                        # caches the schedule in the temp folder
     monkeypatch.setattr(boxscores, "_download_schedule", lambda season: pytest.fail("no download expected"))
     update.main(["--replay", "--from", str(update.FROZEN_PRIORS_PATH), "--out", str(tmp_path / "on.json"),
-                 "--log", str(tmp_path / "on.csv"), "--home", "on", "--pace", "off"])
+                 "--log", str(tmp_path / "on.csv"), "--home", "on", "--pace", "off", "--rest", "off"])
     assert [r["game_id"] for r in predlog.read_log(tmp_path / "on.csv")] == EXPECTED
     for p in boxscores.SCHEDULE_CACHE_DIR.glob("*.json"):
         p.unlink()
     update.main(["--replay", "--from", str(update.FROZEN_PRIORS_PATH), "--out", str(tmp_path / "off.json"),
-                 "--log", str(tmp_path / "off.csv"), "--home", "off", "--pace", "off"])
+                 "--log", str(tmp_path / "off.csv"), "--home", "off", "--pace", "off", "--rest", "off"])
     assert json.loads((tmp_path / "on.json").read_text(encoding="utf-8")) != \
         json.loads((tmp_path / "off.json").read_text(encoding="utf-8"))
 
@@ -377,9 +377,9 @@ def test_home_defaults_on_everywhere():
     assert build_site.make_parser().parse_args([]).home == "on"
     priors = season_priors()
     h, a = GAMES[0]["home"]["id"], GAMES[0]["away"]["id"]
-    default = simulation.simulate_factors(h, a, priors, seed=4, pace="off")
-    assert default == simulation.simulate_factors(h, a, priors, seed=4, pace="off", home="on")
-    assert default != simulation.simulate_factors(h, a, priors, seed=4, pace="off", home="off")
+    default = simulation.simulate_factors(h, a, priors, seed=4, pace="off", rest="off")
+    assert default == simulation.simulate_factors(h, a, priors, seed=4, pace="off", rest="off", home="on")
+    assert default != simulation.simulate_factors(h, a, priors, seed=4, pace="off", rest="off", home="off")
 
 
 def test_bad_home_settings_are_rejected(tmp_path, monkeypatch):
@@ -436,7 +436,7 @@ def test_home_off_reproduces_the_phase6_log(tmp_path):
     before = repo_data_hashes()
     out, log = tmp_path / "priors.json", tmp_path / "log.csv"
     update.main(["--replay", "--from", str(REPO_ROOT / "priors_pre_2026-27_sigma-update.json"), "--out", str(out),
-                 "--log", str(log), "--n", "20", "--m", "30", "--home", "off", "--pace", "off", "--sigma-sim", "legacy"])
+                 "--log", str(log), "--n", "20", "--m", "30", "--home", "off", "--pace", "off", "--rest", "off", "--sigma-sim", "legacy"])
     assert sha(log) == sha(REPO_ROOT / "log_sigma-update.csv")
     assert sha(out) == sha(REPO_ROOT / "priors_2026-27_sigma-update.json")
     assert repo_data_hashes() == before
@@ -448,7 +448,7 @@ def test_home_on_replay_reproduces_log_home(tmp_path):
     before = repo_data_hashes()
     out, log = tmp_path / "priors.json", tmp_path / "log.csv"
     update.main(["--replay", "--from", str(REPO_ROOT / "priors_pre_2026-27_home.json"), "--out", str(out),
-                 "--log", str(log), "--n", "20", "--m", "30", "--home", "on", "--pace", "off", "--sigma-sim", "legacy"])
+                 "--log", str(log), "--n", "20", "--m", "30", "--home", "on", "--pace", "off", "--rest", "off", "--sigma-sim", "legacy"])
     assert sha(log) == sha(REPO_ROOT / "log_home.csv")
     assert json.loads(out.read_text(encoding="utf-8")) == \
         json.loads((REPO_ROOT / "priors_2026-27_home.json").read_text(encoding="utf-8"))
@@ -460,7 +460,7 @@ def test_home_on_replay_reproduces_log_home(tmp_path):
 def test_home_training_reproduces_priors_pre_home(tmp_path):
     before = repo_data_hashes()
     out = tmp_path / "trained.json"
-    dynamic_model.main(["--out", str(out), "--before", "2026-10-03", "--home", "on", "--pace", "off"])
+    dynamic_model.main(["--out", str(out), "--before", "2026-10-03", "--home", "on", "--pace", "off", "--rest", "off"])
     assert json.loads(out.read_text(encoding="utf-8")) == \
         json.loads((REPO_ROOT / "priors_pre_2026-27_home.json").read_text(encoding="utf-8"))
     assert repo_data_hashes() == before
@@ -490,7 +490,7 @@ def test_home_replay_never_overwrites_existing_files(env, tmp_path, target):
     out, log = (real, other) if real.suffix == ".json" else (other, real)
     with pytest.raises(SystemExit):
         update.main(["--replay", "--from", str(REPO_ROOT / "priors_pre_2026-27_home.json"), "--out", str(out),
-                     "--log", str(log), "--home", "on", "--pace", "off"])
+                     "--log", str(log), "--home", "on", "--pace", "off", "--rest", "off"])
     assert repo_data_hashes() == before
 
 

@@ -2,8 +2,9 @@
 TRAINING: run the Kaggle games through the Bayesian update, one row at a time, into a
 new priors file.
 
-    python code/dynamic_model.py --out x.json --before 2026-10-03     # the live defaults: paces + home boost
-    python code/dynamic_model.py --out x.json --before 2026-10-03 --pace off --home off   # = priors_pre_2026-27_sigma-update.json
+    python code/dynamic_model.py --out x.json --before 2026-10-03     # the live defaults: paces + home boost + rest
+    python code/dynamic_model.py --out x.json --before 2026-10-03 --rest off   # = priors_pre_2026-27_pace-home.json
+    python code/dynamic_model.py --out x.json --before 2026-10-03 --pace off --home off --rest off   # = priors_pre_2026-27_sigma-update.json
     python code/dynamic_model.py --out x.json --before 2026-10-03 --years 5 --engine pymc
     python code/dynamic_model.py --out x.json --before 2026-10-03 --all-history
 
@@ -18,7 +19,8 @@ It reads stats/TeamStatisticsExtended.csv or stats/NBA-DataSet/TeamStatisticsExt
 team from the flat league-average curves (state_manager.default_priors), applies every
 row oldest first with tau=0 (one row = one team's offense vs the opponent's defense),
 and writes --out. It never writes priors.json, the frozen priors_pre_2026-27.json or the
-live preseason priors_pre_2026-27_pace-home.json (--start-season's source).
+live preseason priors_pre_2026-27_pace-home-rest.json (--start-season's source) or the
+previous live one, priors_pre_2026-27_pace-home.json.
 
 --pace on (Phase 7, default) also trains each team's pace curve, priors[team]["pace"] = {"mean",
 "std"} in possessions per game: every team starts at model_params.json["pace"]
@@ -31,7 +33,7 @@ value: the home team's offensive line gets "offense", the away team's "defense".
 neutral site (NBA.com's schedule, see boxscores.neutral_flags; the schedules of the training
 seasons are downloaded once into stats/schedules/) and games with a non-NBA team get none.
 
---rest on (Phase 9, default off) adds the rest effect (model_params.json["rest"], see
+--rest on (Phase 9, default on) adds the rest effect (model_params.json["rest"], see
 rest.py and fit_rest.py) to each row's expected value, from both teams' rest before the
 game (NBA.com's schedules); it adds to the home boost. Games with a non-NBA team get none.
 """
@@ -57,8 +59,8 @@ CSV_LOCATIONS = [REPO_ROOT / "stats" / "TeamStatisticsExtended.csv",
 DEFAULT_CSV = next((p for p in CSV_LOCATIONS if p.exists()), CSV_LOCATIONS[0])
 # never written, even with --overwrite
 PROTECTED = [REPO_ROOT / name for name in
-             ("priors_pre_2026-27.json", "priors_pre_2026-27_pace-home.json", "priors.json", "applied_games.json",
-              "priors_2026-27_base.json", "model_params.json")]
+             ("priors_pre_2026-27.json", "priors_pre_2026-27_pace-home.json", "priors_pre_2026-27_pace-home-rest.json",
+              "priors.json", "applied_games.json", "priors_2026-27_base.json", "model_params.json")]
 TRAINING_CUTOFF = "2026-10-03"   # first day of the 2026-27 preseason (see the module docstring)
 TRAINING_TAU = 0.0
 CHECKPOINT_EVERY = 50   # rows, pymc engine only

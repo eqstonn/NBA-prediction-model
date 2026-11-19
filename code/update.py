@@ -3,7 +3,7 @@ In-season updates to priors.json.
 
     python code/update.py --start-season          # reset priors for the new season (N=20) from the live preseason file
     python code/update.py --start-season --n 10   # looser priors: worth 10 games of evidence
-    python code/update.py --start-season --from priors_pre_2026-27.json --pace off
+    python code/update.py --start-season --from priors_pre_2026-27.json --pace off --rest off
                                                   # reset from the frozen snapshot (no team paces)
     python code/update.py --update                # apply every finished, not-yet-applied game
     python code/update.py --update --through 2026-11-01 --limit 20   # stop at a date / after 20 games
@@ -14,10 +14,11 @@ In-season updates to priors.json.
 
 Season reset
 ------------
-priors_pre_2026-27_pace-home.json is the live model's preseason priors (exact training
-with team paces and the home boost, the defaults). priors_pre_2026-27.json is the frozen
-snapshot of the original training. Both are only ever READ here (write_json refuses them).
-A reset rebuilds priors.json from the first one (or --from):
+priors_pre_2026-27_pace-home-rest.json is the live model's preseason priors (exact training
+with team paces, the home boost and the rest effect: the defaults). priors_pre_2026-27_pace-home.json
+(the previous live model's) and priors_pre_2026-27.json (the frozen snapshot of the original
+training) are kept too. All three are only ever READ here (write_json refuses them). A reset
+rebuilds priors.json from the first one (or --from):
 
   * NBA teams: every offense/defense factor keeps its mean, but its std is set to
     0.1 / sqrt(N). Training collapsed the stds to ~0.005, which would make this
@@ -67,7 +68,8 @@ simulation behind each logged prediction. Both legacy with every switch off = th
 model (reproduces log_exact.csv). applied_games.json records the engine and both sigma modes.
 
 Live defaults (params.py): exact engine, both sigmas fitted, --pace on, --sim-corr off,
---home on. The previous live model is --sigma-sim legacy --pace off --home off.
+--home on, --rest on. The previous live model (pace-home) is --rest off; the Phase 6 one is
+--sigma-sim legacy --pace off --home off --rest off.
 
 Simulation switches (Phase 7; see simulation.py): --sim-corr on draws the game
 factors jointly with the fitted correlation; --pace on uses the teams' pace curves for the
@@ -81,7 +83,7 @@ value of each line in the update and in the simulation, except at neutral sites 
 NBA.com's schedule, see boxscores.py). Use priors trained with --home on
 (priors_pre_2026-27_pace-home.json). applied_games.json records "home" and "neutral".
 
-Rest (Phase 9, default off): --rest on adds model_params.json["rest"] (fit_rest.py) to the
+Rest (Phase 9, default on): --rest on adds model_params.json["rest"] (fit_rest.py) to the
 expected value of each line in the update and in the simulation, from both teams' rest before
 the game (back-to-back / 1 day / 2+, from NBA.com's schedule, see rest.py). Use priors trained
 with --rest on (priors_pre_2026-27_pace-home-rest.json). applied_games.json records "rest".
@@ -113,7 +115,9 @@ from schedule import NBA_TEAMS
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FROZEN_PRIORS_PATH = REPO_ROOT / "priors_pre_2026-27.json"  # READ-ONLY, never write
-START_PRIORS_PATH = REPO_ROOT / "priors_pre_2026-27_pace-home.json"   # live preseason priors, READ-ONLY
+START_PRIORS_PATH = REPO_ROOT / "priors_pre_2026-27_pace-home-rest.json"   # live preseason priors, READ-ONLY
+PACE_HOME_PRIORS_PATH = REPO_ROOT / "priors_pre_2026-27_pace-home.json"   # previous live preseason priors, READ-ONLY
+READ_ONLY_PATHS = (FROZEN_PRIORS_PATH, START_PRIORS_PATH, PACE_HOME_PRIORS_PATH)
 PRIORS_PATH = REPO_ROOT / "priors.json"
 APPLIED_GAMES_PATH = REPO_ROOT / "applied_games.json"
 LOG_PATH = REPO_ROOT / "prediction_log.csv"                 # --update's prediction log
@@ -140,7 +144,7 @@ def load_json(path):
 def write_json(path, data):
     """Write JSON atomically (temp file + rename). Refuses to touch the read-only preseason files."""
     path = Path(path)
-    if any(path.resolve() == p.resolve() for p in (FROZEN_PRIORS_PATH, START_PRIORS_PATH)):
+    if any(path.resolve() == p.resolve() for p in READ_ONLY_PATHS):
         raise PermissionError(f"{path.name} is a read-only preseason priors file and must never be written")
     tmp = path.with_name(path.name + ".tmp")
     with open(tmp, "w", encoding="utf-8") as file:
@@ -371,7 +375,9 @@ def run_update(through=None, limit=None, m: int = DEFAULT_M, log_path=None, engi
     schedule = boxscores.select_games(boxscores.fetch_finished_games(disagreements=disagreements), through=through)
     todo = [g for g in schedule if g["game_id"] not in applied]
     already = len(schedule) - len(todo)
-    rest_table = rest_days.rest_games([g["game_id"] for g in todo]) if with_rest and todo else {}
+    # rest from the schedule plus every finished game, so a game the schedule leaves out still counts
+    rest_table = (rest_days.rest_games([g["game_id"] for g in todo], extra_games=[rest_days.from_game(g) for g in schedule])
+                  if with_rest and todo else {})
     print(f"{len(schedule)} games from {boxscores.OPENING_NIGHT} through {through or 'today'}: "
           f"{already} already applied, {len(todo)} to go"
           + (f" (stopping after {limit})" if limit is not None and limit < len(todo) else "")

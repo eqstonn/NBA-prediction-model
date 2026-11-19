@@ -21,7 +21,7 @@ home "on" (Phase 8, default): team_a is the home team; the home boost (model_par
 added to each side's matchup expectation in step 1, except at neutral sites. "off" adds
 nothing, so the draws are the same numbers as before.
 
-rest "on" (Phase 9, default "off"): each side's matchup expectation also gets the rest effect
+rest "on" (Phase 9, default "on"): each side's matchup expectation also gets the rest effect
 (model_params.json["rest"]) from both teams' rest, rest_a / rest_b ("b2b", "1", "2+"; see
 rest.py), added to the home boost. "off" adds nothing.
 """
@@ -189,8 +189,8 @@ if __name__ == "__main__":
     all_cards = []
     
     for game in games:
-        # Run the simulation for this matchup
-        results = simulate_factors(game["a_id"], game["b_id"], priors_data)
+        # Run the simulation for this matchup (no dates here: both teams rested, so rest adds nothing)
+        results = simulate_factors(game["a_id"], game["b_id"], priors_data, rest_a="2+", rest_b="2+")
 
         # Determine who is favored for the spread text
         spread = results['team_a_avg_score'] - results['team_b_avg_score']

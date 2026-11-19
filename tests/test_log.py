@@ -93,9 +93,10 @@ def test_append_rows_never_duplicates(tmp_path):
 
 def test_prediction_is_reproducible_with_fixed_seed():
     priors = update.reset_priors(json.loads(START.read_text(encoding="utf-8")))
-    a = predict_game("1610612765", "1610612738", priors, seed=predlog.PREDICT_SEED)
-    b = predict_game("1610612765", "1610612738", priors, seed=predlog.PREDICT_SEED)
-    c = predict_game("1610612765", "1610612738", priors, seed=predlog.PREDICT_SEED + 1)
+    rested = {"rest_home": "2+", "rest_away": "b2b"}
+    a = predict_game("1610612765", "1610612738", priors, seed=predlog.PREDICT_SEED, **rested)
+    b = predict_game("1610612765", "1610612738", priors, seed=predlog.PREDICT_SEED, **rested)
+    c = predict_game("1610612765", "1610612738", priors, seed=predlog.PREDICT_SEED + 1, **rested)
     assert a == b
     assert a != c
 

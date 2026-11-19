@@ -91,20 +91,36 @@ def rest_flags(raw: dict) -> dict:
     return rest_table(schedule_games(raw))
 
 
-def rest_games(game_ids) -> dict:
+def from_game(game: dict) -> dict:
+    """A boxscores.py-shaped game ({"game_id", "date", "home": {"id"}, "away": {"id"}}) as a schedule_games entry."""
+    return {"game_id": game["game_id"], "date": game["date"], "season": boxscores.season_of(game["game_id"]),
+            "home": str(game["home"]["id"]), "away": str(game["away"]["id"]), "arena": None}
+
+
+def rest_games(game_ids, extra_games=None) -> dict:
     """
     {gameId: {teamId: rest info}} for the given games, from the cached schedules of their
     seasons (like boxscores.neutral_games: a season whose cache is missing, or lacks one of
     the games, is downloaded once; a game that still isn't there raises KeyError).
+    extra_games: more games (from_game shape) to count, for games the schedule lacks: --update
+    passes every finished game (game log + schedule), so a game NBA.com's schedule leaves out
+    still gets its rest and counts toward its teams' next games (its arena is unknown).
     """
+    extra_games = [g for g in (extra_games or []) if g["game_id"][:3] in COUNTED_TYPES]
+
+    def table_for(raw, season):
+        games = schedule_games(raw)
+        known = {g["game_id"] for g in games}
+        return rest_table(games + [g for g in extra_games if g["season"] == season and g["game_id"] not in known])
+
     by_season = {}
     for gid in game_ids:
         by_season.setdefault(boxscores.season_of(gid), []).append(boxscores.game_key(gid))
     out = {}
     for season, ids in by_season.items():
-        table = rest_flags(boxscores.get_schedule(season))
+        table = table_for(boxscores.get_schedule(season), season)
         if any(gid not in table for gid in ids):
-            table = rest_flags(boxscores.get_schedule(season, refresh=True))
+            table = table_for(boxscores.get_schedule(season, refresh=True), season)
         missing = [gid for gid in ids if gid not in table]
         if missing:
             raise KeyError(f"games not in NBA.com's {season} schedule (or without both teams): {missing[:5]}")
