@@ -59,11 +59,12 @@ BURN_IN_DAYS = 365
 
 
 def run_pass(data: dict, home: str, variants: list, rest: str = params.DEFAULT_REST_MODE,
-             with_ids: bool = False) -> dict:
+             with_ids: bool = False, calib: str = params.DEFAULT_CALIB_MODE) -> dict:
     """
     {variant: [(p_home, actual home margin, projected margin, projected total, actual total, sim margin SD)]}
     for every scored game, simulated with `home` and `rest` from the one-step-ahead curves of the training pass.
     with_ids=True appends the game's 10-digit NBA.com gameId to each record (report.py matches Vegas lines by it).
+    calib="on": the win probability is calibrated (Phase 10b); everything else is the same.
     """
     cleaned = data["cleaned"]
     with_home, with_rest = params.is_on(home, "home"), params.is_on(rest, "rest")
@@ -107,7 +108,7 @@ def run_pass(data: dict, home: str, variants: list, rest: str = params.DEFAULT_R
             days = {"rest_a": home_row[5][0]["rest"], "rest_b": home_row[5][1]["rest"]} if with_rest else {}
             for v, kw in settings.items():
                 r = simulation.simulate_factors(home_id, away_id, priors, seed=k, home=home, neutral=neutral,
-                                                rest=rest, **days, **kw)
+                                                rest=rest, calib=calib, **days, **kw)
                 record = (r["team_a_win_pct"] / 100, margin, r["team_a_avg_score"] - r["team_b_avg_score"],
                           r["team_a_avg_score"] + r["team_b_avg_score"], total, r["margin_sd"])
                 out[v].append(record + (str(int(gid)).zfill(10),) if with_ids else record)
@@ -140,6 +141,9 @@ def main(argv=None):
     parser.add_argument("--rest", nargs="+", choices=params.SWITCH_MODES, default=[params.DEFAULT_REST_MODE],
                         help="rest effect setting(s); each is its own training pass "
                              f"(default {params.DEFAULT_REST_MODE})")
+    parser.add_argument("--calib", nargs="+", choices=params.SWITCH_MODES, default=[params.DEFAULT_CALIB_MODE],
+                        help="win-probability calibration setting(s) (Phase 10b); the same training pass "
+                             f"(default {params.DEFAULT_CALIB_MODE})")
     parser.add_argument("--csv", default=str(dynamic_model.DEFAULT_CSV), help="Kaggle TeamStatisticsExtended.csv")
     parser.add_argument("--before", default=dynamic_model.TRAINING_CUTOFF, metavar="YYYY-MM-DD")
     parser.add_argument("--years", type=int, default=3)
@@ -156,9 +160,11 @@ def main(argv=None):
     columns = {}
     for home in dict.fromkeys(args.home):
         for rest in dict.fromkeys(args.rest):
-            for v, records in run_pass(data, home, args.variants, rest).items():
-                columns[f"{v}, home {home}" + ("" if args.rest == [params.DEFAULT_REST_MODE] else f", rest {rest}")] = \
-                    summarize(records)
+            for calib in dict.fromkeys(args.calib):
+                for v, records in run_pass(data, home, args.variants, rest, calib=calib).items():
+                    columns[f"{v}, home {home}" + ("" if args.rest == [params.DEFAULT_REST_MODE] else f", rest {rest}")
+                            + ("" if args.calib == [params.DEFAULT_CALIB_MODE] else f", calib {calib}")] = \
+                        summarize(records)
     n = len(next(iter(columns.values()))["brier_each"])
     print(f"{n} NBA training games scored ({data['first']} to {data['last']}, after the first season; "
           f"one-step-ahead) in {time.perf_counter() - start:.0f} s\n")

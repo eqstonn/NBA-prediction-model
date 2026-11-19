@@ -100,11 +100,13 @@ def preseason_priors(csv_path, season: str) -> dict:
             "games": data["games"]}
 
 
-def run_season(start_priors: dict, games: list, n: int = update.DEFAULT_N, m: int = update.DEFAULT_M) -> list:
+def run_season(start_priors: dict, games: list, n: int = update.DEFAULT_N, m: int = update.DEFAULT_M,
+               calib: str = params.DEFAULT_CALIB_MODE) -> list:
     """
     The live in-season procedure on `games`: reset (N), then each game predicted, then applied (M).
     Returns one row per game: {"game_id", "date", "season", "home_won", "margin", "total", "p_model",
-    "proj_margin", "proj_total"} (the report's row shape).
+    "proj_margin", "proj_total"} (the report's row shape). calib: the win-probability calibration
+    (Phase 10b; it changes only p_model, never the ratings).
     """
     priors = update.reset_priors(start_priors, n)
     update_sigma, sim_sigma = params.update_sigma(), params.sim_sigma()
@@ -113,7 +115,7 @@ def run_season(start_priors: dict, games: list, n: int = update.DEFAULT_N, m: in
         home, away = game["home"], game["away"]
         prediction = predict_game(home["id"], away["id"], priors, seed=predlog.PREDICT_SEED, sigma=sim_sigma,
                                   neutral=game["neutral"], rest_home=game["rest"]["home"],
-                                  rest_away=game["rest"]["away"])
+                                  rest_away=game["rest"]["away"], calib=calib)
         if prediction is None:
             raise KeyError(f"game {game['game_id']}: a team is missing from the priors")
         margin = home["pts"] - away["pts"]
@@ -127,7 +129,7 @@ def run_season(start_priors: dict, games: list, n: int = update.DEFAULT_N, m: in
 
 
 def run_backtest(csv_path=None, seasons=SEASONS, n: int = update.DEFAULT_N, m: int = update.DEFAULT_M,
-                 data=None) -> dict:
+                 data=None, calib: str = params.DEFAULT_CALIB_MODE) -> dict:
     """
     Every season in `seasons` with the live procedure. data: the scoring window's load_training_rows
     (default: the 3 years before 2026-10-03, which hold both seasons).
@@ -139,10 +141,10 @@ def run_backtest(csv_path=None, seasons=SEASONS, n: int = update.DEFAULT_N, m: i
     for season in seasons:
         games, skipped = season_games(data, season)
         pre = preseason_priors(csv_path, season)
-        rows += run_season(pre["priors"], games, n, m)
+        rows += run_season(pre["priors"], games, n, m, calib=calib)
         info[season] = {"cutoff": preseason_cutoff(season), "trained_on": f"{pre['first']} to {pre['last']}",
                         "train_games": pre["games"], "games": len(games), "skipped": skipped}
-    return {"rows": rows, "seasons": info, "n": n, "m": m}
+    return {"rows": rows, "seasons": info, "n": n, "m": m, "calib": calib}
 
 
 def main(argv=None):
@@ -151,6 +153,8 @@ def main(argv=None):
     parser.add_argument("--seasons", nargs="+", default=list(SEASONS), help=f"default {' '.join(SEASONS)}")
     parser.add_argument("--n", type=int, default=update.DEFAULT_N, help=f"season reset N (default {update.DEFAULT_N})")
     parser.add_argument("--m", type=int, default=update.DEFAULT_M, help=f"per-game drift M (default {update.DEFAULT_M})")
+    parser.add_argument("--calib", choices=params.SWITCH_MODES, default=params.DEFAULT_CALIB_MODE,
+                        help=f"calibrated win %% (Phase 10b); default {params.DEFAULT_CALIB_MODE}")
     args = parser.parse_args(argv)
     for season in args.seasons:
         try:
@@ -158,7 +162,7 @@ def main(argv=None):
         except ValueError as err:
             parser.error(str(err))
     start = time.perf_counter()
-    result = run_backtest(args.csv, args.seasons, args.n, args.m)
+    result = run_backtest(args.csv, args.seasons, args.n, args.m, calib=args.calib)
     for season, s in result["seasons"].items():
         rows = [r for r in result["rows"] if r["season"] == season]
         p = np.array([r["p_model"] for r in rows])
@@ -168,7 +172,7 @@ def main(argv=None):
         print(f"{season}: {len(rows)} games (preseason priors from {s['train_games']} games, {s['trained_on']}; "
               f"skipped {len(s['skipped'])}): accuracy {hit.mean():.1%}, Brier {np.mean((p - y) ** 2):.4f}, "
               f"margin MAE {mae:.2f}")
-    print(f"N={result['n']}, M={result['m']}; {time.perf_counter() - start:.0f} s")
+    print(f"N={result['n']}, M={result['m']}, calib={result['calib']}; {time.perf_counter() - start:.0f} s")
 
 
 if __name__ == "__main__":

@@ -843,5 +843,27 @@
             },
             "fitted": "2026-11-18"
         }
+    },
+    "calib": {
+        "temperature": 1.3612,
+        "temperature_se": 0.0968,
+        "method": "P_calibrated = Phi(a * Phi^-1(P_simulated)); maximum likelihood (Bernoulli, home win); SE from the observed information",
+        "fit": {
+            "data": "live-procedure backtest (backtest.py, N=20, M=30), season(s) 2024-25 only; 2025-26 and 2026-27 are test sets",
+            "games": 1316,
+            "loglik_before": -806.76,
+            "loglik_after": -799.54,
+            "accuracy": 0.6672,
+            "confidence_before": 0.6272,
+            "confidence_after": 0.6662,
+            "simulation": {
+                "sigma_sim": "fitted",
+                "sim_corr": "off",
+                "pace": "on",
+                "home": "on",
+                "rest": "on"
+            },
+            "fitted": "2026-11-19"
+        }
     }
 }

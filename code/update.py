@@ -89,6 +89,11 @@ expected value of each line in the update and in the simulation, from both teams
 the game (back-to-back / 1 day / 2+, from NBA.com's schedule, see rest.py). Use priors trained
 with --rest on (priors_pre_2026-27_pace-home-rest.json). applied_games.json records "rest".
 
+Win-probability calibration (Phase 10b, --calib on|off, default off): each logged win % is
+Phi(a * Phi^-1(P)) of the simulated P, a = model_params.json["calib"]["temperature"] (fit_calib.py).
+It only changes the win %, never the pick or the scores, and never the update, so a replay with
+--calib on ends in the same priors. applied_games.json records "calib" for games applied from now on.
+
 Betting lines (Phase 10a, --lines on|off, default on; not part of the model): --update also saves
 one snapshot of every upcoming game's Vegas lines from The Odds API into data/lines_2026-27.csv
 (lines.py: ONE API request per run, appended, never overwritten). Without ODDS_API_KEY, or if the
@@ -296,7 +301,8 @@ def record_game(priors: dict, applied: dict, game: dict, engine: str = DEFAULT_E
                 sigma_update: str = params.DEFAULT_UPDATE_SIGMA_MODE,
                 sigma_sim: str = params.DEFAULT_SIM_SIGMA_MODE,
                 sim_corr: str = params.DEFAULT_SIM_CORR_MODE, pace: str = params.DEFAULT_PACE_MODE,
-                home_mode: str = params.DEFAULT_HOME_MODE, rest_mode: str = params.DEFAULT_REST_MODE) -> None:
+                home_mode: str = params.DEFAULT_HOME_MODE, rest_mode: str = params.DEFAULT_REST_MODE,
+                calib: str = params.DEFAULT_CALIB_MODE) -> None:
     """Save priors.json and record the game in applied_games.json, crash-safely (see module docstring)."""
     home, away = game["home"], game["away"]
     entry = {"date": game["date"],
@@ -311,6 +317,7 @@ def record_game(priors: dict, applied: dict, game: dict, engine: str = DEFAULT_E
              "pace": pace,
              "home": home_mode,
              "rest": rest_mode,
+             "calib": calib,
              "pending": priors_fingerprint(priors)}
     applied[game["game_id"]] = entry
     write_json(APPLIED_GAMES_PATH, applied)   # 1. pending, with the fingerprint of the new priors
@@ -326,12 +333,12 @@ def fit_seed(game_id: str) -> int:
 
 def log_prediction(priors: dict, game: dict, log_path, sigma=None, sim_corr: str = params.DEFAULT_SIM_CORR_MODE,
                    pace: str = params.DEFAULT_PACE_MODE, home: str = params.DEFAULT_HOME_MODE,
-                   rest: str = params.DEFAULT_REST_MODE) -> None:
+                   rest: str = params.DEFAULT_REST_MODE, calib: str = params.DEFAULT_CALIB_MODE) -> None:
     """Predict `game` from `priors` (fixed simulation seed) and append it to the log unless it's already there."""
     days = game.get("rest", {})
     prediction = predict_game(game["home"]["id"], game["away"]["id"], priors, seed=predlog.PREDICT_SEED, sigma=sigma,
                               sim_corr=sim_corr, pace=pace, home=home, neutral=game.get("neutral", False),
-                              rest=rest, rest_home=days.get("home"), rest_away=days.get("away"))
+                              rest=rest, rest_home=days.get("home"), rest_away=days.get("away"), calib=calib)
     if prediction is None:
         raise KeyError(f"game {game['game_id']}: a team is missing from the priors")
     predlog.append_rows(log_path, [predlog.make_row(game, prediction)])
@@ -374,7 +381,7 @@ def run_update(through=None, limit=None, m: int = DEFAULT_M, log_path=None, engi
                sigma_sim: str = params.DEFAULT_SIM_SIGMA_MODE,
                sim_corr: str = params.DEFAULT_SIM_CORR_MODE, pace: str = params.DEFAULT_PACE_MODE,
                home: str = params.DEFAULT_HOME_MODE, rest: str = params.DEFAULT_REST_MODE,
-               lines: str = betting_lines.DEFAULT_LINES_MODE) -> dict:
+               lines: str = betting_lines.DEFAULT_LINES_MODE, calib: str = params.DEFAULT_CALIB_MODE) -> dict:
     """
     Apply every finished, not-yet-applied game (oldest first) to priors.json; saves after
     each game. Each game is first predicted from the current priors and logged to
@@ -389,6 +396,7 @@ def run_update(through=None, limit=None, m: int = DEFAULT_M, log_path=None, engi
              "lines": lines.fetch_lines' result, or None when not saved}.
     """
     params.is_on(lines, "lines")                  # validates the setting before any work
+    params.calibrate_win_prob(0.6, calib)         # validates the setting (and the temperature) before any work
     log_path = Path(log_path or LOG_PATH)
     update_sigma, sim_sigma = params.update_sigma(sigma_update), params.sim_sigma(sigma_sim)
     params.sim_corr(sim_corr)                     # validates the setting (and the matrix) before any work
@@ -413,7 +421,7 @@ def run_update(through=None, limit=None, m: int = DEFAULT_M, log_path=None, engi
           f"{already} already applied, {len(todo)} to go"
           + (f" (stopping after {limit})" if limit is not None and limit < len(todo) else "")
           + f". M={m}, tau={season_tau(m):.5f}, engine={engine}, sigma update={sigma_update} sim={sigma_sim}, "
-            f"sim_corr={sim_corr}, pace={pace}, home={home}, rest={rest}\n")
+            f"sim_corr={sim_corr}, pace={pace}, home={home}, rest={rest}, calib={calib}\n")
     # betting lines for upcoming games (the schedule was just refreshed above, for the matching)
     lines_result = save_lines(lines)
 
@@ -444,10 +452,11 @@ def run_update(through=None, limit=None, m: int = DEFAULT_M, log_path=None, engi
         if with_rest:
             game = add_rest(game, rest_table)
         # before applying: the prediction uses pre-game priors
-        log_prediction(priors, game, log_path, sim_sigma, sim_corr=sim_corr, pace=pace, home=home, rest=rest)
+        log_prediction(priors, game, log_path, sim_sigma, sim_corr=sim_corr, pace=pace, home=home, rest=rest,
+                       calib=calib)
         new_priors = apply_game(copy.deepcopy(priors), game, m, random_seed=fit_seed(game["game_id"]), engine=engine,
                                 sigma=update_sigma, pace=pace, home=home, rest=rest)
-        record_game(new_priors, applied, game, engine, sigma_update, sigma_sim, sim_corr, pace, home, rest)
+        record_game(new_priors, applied, game, engine, sigma_update, sigma_sim, sim_corr, pace, home, rest, calib)
         priors = new_priors
         done.append(game["game_id"])
         print(f"  [{len(done):>4}] {label}  {time.perf_counter() - t:.1f} s")
@@ -482,7 +491,7 @@ def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M
            sigma_update: str = params.DEFAULT_UPDATE_SIGMA_MODE, sigma_sim: str = params.DEFAULT_SIM_SIGMA_MODE,
            overwrite: bool = False, sim_corr: str = params.DEFAULT_SIM_CORR_MODE,
            pace: str = params.DEFAULT_PACE_MODE, home: str = params.DEFAULT_HOME_MODE,
-           rest: str = params.DEFAULT_REST_MODE) -> dict:
+           rest: str = params.DEFAULT_REST_MODE, calib: str = params.DEFAULT_CALIB_MODE) -> dict:
     """
     Season reset from `from_path` (std 0.1/sqrt(n)), then every game in applied_games.json,
     oldest first (date, gameId), each predicted + logged before it is applied. Writes ONLY
@@ -508,6 +517,7 @@ def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M
     params.sim_corr(sim_corr)                     # validates the setting (and the matrix) before any work
     params.home_offsets(home)                     # validates the setting (and the boost) before any work
     params.rest_offsets(rest, "2+", "2+")         # validates the setting (and the effects) before any work
+    params.calibrate_win_prob(0.6, calib)         # validates the setting (and the temperature) before any work
     with_pace, with_home = params.is_on(pace, "pace"), params.is_on(home, "home")
     with_rest = params.is_on(rest, "rest")
     start_priors = load_json(from_path)
@@ -528,7 +538,7 @@ def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M
     print(f"Replaying {len(order)} games from {applied[order[0]]['date']} to {applied[order[-1]]['date']}, "
           f"oldest first, from {from_path.name} (N={n}, M={m}, engine={engine}, "
           f"sigma update={sigma_update} sim={sigma_sim}, sim_corr={sim_corr}, pace={pace}, home={home}, "
-          f"rest={rest}) "
+          f"rest={rest}, calib={calib}) "
           f"-> {out_path.name}, {log_path.name}"
           + (f"; neutral sites: {', '.join(g for g in order if neutral[g]) or 'none'}" if with_home else "")
           + (f"; {sum(any(i['rest'] == 'b2b' for i in rest_table[g].values()) for g in order)} games with a team "
@@ -550,7 +560,8 @@ def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M
         if with_rest:
             game = add_rest(game, rest_table)
         t = time.perf_counter()
-        log_prediction(priors, game, log_path, sim_sigma, sim_corr=sim_corr, pace=pace, home=home, rest=rest)
+        log_prediction(priors, game, log_path, sim_sigma, sim_corr=sim_corr, pace=pace, home=home, rest=rest,
+                       calib=calib)
         apply_game(priors, game, m, random_seed=fit_seed(game_id), engine=engine, sigma=update_sigma, pace=pace,
                    home=home, rest=rest)
         print(f"  [{i:>4}/{len(order)}] {game['date']}  {applied[game_id]['matchup']}  ({game_id})  "
@@ -675,6 +686,9 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rest", choices=params.SWITCH_MODES, default=params.DEFAULT_REST_MODE,
                         help="add the fitted rest effect (back-to-backs, from NBA.com's schedule) to the expected "
                              f"value in the update and the simulation; default {params.DEFAULT_REST_MODE}")
+    parser.add_argument("--calib", choices=params.SWITCH_MODES, default=params.DEFAULT_CALIB_MODE,
+                        help="calibrate the logged win %% with the fitted temperature (Phase 10b, "
+                             f"model_params.json[\"calib\"]); scores unchanged; default {params.DEFAULT_CALIB_MODE}")
     parser.add_argument("--lines", choices=params.SWITCH_MODES, default=None,
                         help="with --update: also save a snapshot of upcoming games' betting lines from The Odds "
                              f"API (key from {betting_lines.KEY_ENV}; one request; skipped with a warning without "
@@ -735,7 +749,7 @@ def main(argv=None):
         try:
             replay(args.from_path, args.out, args.log, n=args.n, m=args.m, engine=args.engine,
                    sigma_update=args.sigma_update, sigma_sim=args.sigma_sim, overwrite=args.overwrite,
-                   sim_corr=args.sim_corr, pace=args.pace, home=args.home, rest=args.rest)
+                   sim_corr=args.sim_corr, pace=args.pace, home=args.home, rest=args.rest, calib=args.calib)
         except ValueError as err:
             parser.error(str(err))
         return
@@ -756,7 +770,7 @@ def main(argv=None):
                 parser.error(str(err))
         run_update(through=args.through, limit=args.limit, m=args.m, log_path=args.log, engine=args.engine,
                    sigma_update=args.sigma_update, sigma_sim=args.sigma_sim, sim_corr=args.sim_corr, pace=args.pace,
-                   home=args.home, rest=args.rest, lines=args.lines)
+                   home=args.home, rest=args.rest, lines=args.lines, calib=args.calib)
     if args.trial is not None:
         trial(args.trial, args.m, engine=args.engine, sigma_update=args.sigma_update, pace=args.pace,
               home=args.home, rest=args.rest)

@@ -49,10 +49,23 @@ Rest (Phase 9), "on" or "off", default "on" (live since the rest switch):
             rest["offense"][r_o][f] + rest["defense"][r_d][f] ("2+" and any category not
             listed: 0). It adds to the home boost. code/fit_rest.py estimates it from the
             training data only (the difference form: defense = -offense, back-to-backs only).
+
+Win-probability calibration (Phase 10b), "on" or "off", default "off":
+
+  calib     the simulated win probability P becomes Phi(a * Phi^-1(P)), a = the temperature in
+            model_params.json["calib"] (code/fit_calib.py, fitted on the 2024-25 live-procedure
+            backtest only). Since P ~ Phi(projected margin / simulated margin SD), this narrows
+            the simulated margin distribution by 1/a for the win % only. It is monotone, so it
+            never changes the pick, and the projected scores are untouched. Why it is needed:
+            in the live procedure the simulation is underconfident (confidence 62.5% vs 66.5%
+            accuracy over 2,638 backtest games): its 8 factor noises are drawn independently
+            while real ones partly cancel in the margin, projected margins are ~11% too small,
+            and real margins are fat-tailed (see fit_calib.py).
 """
 import json
 import math
 from pathlib import Path
+from statistics import NormalDist
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PARAMS_PATH = REPO_ROOT / "model_params.json"
@@ -70,6 +83,8 @@ DEFAULT_SIM_CORR_MODE = "off"
 DEFAULT_PACE_MODE = "on"
 DEFAULT_HOME_MODE = "on"
 DEFAULT_REST_MODE = "on"
+DEFAULT_CALIB_MODE = "off"
+CALIB_CLIP = 5e-5   # P is clipped to [CALIB_CLIP, 1 - CALIB_CLIP] (half a draw of 10,000) before Phi^-1
 REST_CATEGORIES = ("b2b", "1", "2+")   # rest.CATEGORIES; "2+" is the baseline (no shift)
 # rows/columns of the factor correlation: the team's offensive line, then the opponent's
 CORR_LABELS = tuple(f"team {f}" for f in FACTORS) + tuple(f"opponent {f}" for f in FACTORS)
@@ -128,7 +143,7 @@ def is_on(mode: str, what: str = "switch") -> bool:
 
 
 FITTED_BY = {"factor_corr": "fit_sim.py", "points": "fit_sim.py", "pace": "fit_sim.py", "home": "fit_home.py",
-             "rest": "fit_rest.py"}
+             "rest": "fit_rest.py", "calib": "fit_calib.py"}
 
 
 def section(name: str) -> dict:
@@ -298,3 +313,34 @@ def rest_offsets(mode: str, rest_a, rest_b, effects=None):
     if not is_on(mode, "rest"):
         return None, None
     return rest_offset(mode, rest_a, rest_b, effects), rest_offset(mode, rest_b, rest_a, effects)
+
+
+# ---------------------------------------------------------------------------
+# Phase 10b: win-probability calibration
+# ---------------------------------------------------------------------------
+
+_NORMAL = NormalDist()
+
+
+def check_temperature(a) -> float:
+    if not isinstance(a, (int, float)) or isinstance(a, bool) or not 0.2 <= a <= 5:
+        raise ValueError(f"calibration temperature must be a number in [0.2, 5], got {a!r}")
+    return float(a)
+
+
+def calib_temperature() -> float:
+    """The fitted temperature a (model_params.json["calib"]["temperature"])."""
+    return check_temperature(section("calib").get("temperature"))
+
+
+def calibrate_win_prob(p: float, mode: str = DEFAULT_CALIB_MODE, temperature=None) -> float:
+    """
+    The win probability with the calibration applied: Phi(a * Phi^-1(p)) when mode is "on"
+    (p clipped to [CALIB_CLIP, 1 - CALIB_CLIP] first), p unchanged when "off". Monotone and
+    symmetric (1 - f(p) = f(1 - p)); f(0.5) = 0.5. temperature: default calib_temperature().
+    """
+    if not is_on(mode, "calib"):
+        return p
+    a = check_temperature(temperature) if temperature is not None else calib_temperature()
+    q = min(max(float(p), CALIB_CLIP), 1 - CALIB_CLIP)
+    return _NORMAL.cdf(a * _NORMAL.inv_cdf(q))

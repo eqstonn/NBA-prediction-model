@@ -41,6 +41,7 @@ from schedule import NBA_TEAMS  # noqa: E402
 LIVE = {"engine": "exact", "sigma_update": "fitted", "sigma_sim": "fitted", "sim_corr": "off", "pace": "on",
         "home": "on", "rest": "on"}
 OLD_LIVE = {"sigma_sim": "legacy", "sim_corr": "off", "pace": "off", "home": "off"}   # Phase 6
+CALIB = "off"   # Phase 10b win-probability calibration: not live (the 210 recorded games predate it, so not in LIVE)
 GAMES = json.loads((REPO_ROOT / "tests" / "fixtures" / "games_2026-27_first5.json").read_text(encoding="utf-8"))
 PRE = REPO_ROOT / "priors_pre_2026-27_pace-home-rest.json"
 REPLAY = REPO_ROOT / "priors_2026-27_pace-home-rest.json"
@@ -78,6 +79,8 @@ def test_params_defaults_are_the_live_model():
     assert params.DEFAULT_PACE_MODE == LIVE["pace"]
     assert params.DEFAULT_HOME_MODE == LIVE["home"]
     assert params.DEFAULT_REST_MODE == LIVE["rest"]
+    assert params.DEFAULT_CALIB_MODE == CALIB
+    assert params.calibrate_win_prob(0.6) == 0.6
     assert params.update_sigma() == params.sim_sigma() == params.fitted_sigma()
     assert params.sim_corr() is None
     assert params.home_offsets() == (params.home_boost()["offense"], params.home_boost()["defense"])
@@ -89,31 +92,31 @@ def test_params_defaults_are_the_live_model():
 def test_command_line_defaults_are_the_live_model():
     u = update.make_parser().parse_args([])
     assert {k: getattr(u, k) for k in LIVE} == LIVE
-    assert (u.n, u.m) == (20, 30)
+    assert (u.n, u.m, u.calib) == (20, 30, CALIB)
     d = dynamic_model.make_parser().parse_args(["--out", "x.json", "--before", "2026-10-03"])
     assert (d.engine, d.sigma_update, d.pace, d.home, d.rest) == ("exact", "fitted", "on", "on", "on")
     b = build_site.make_parser().parse_args([])
-    assert (b.sigma_sim, b.sim_corr, b.pace, b.home, b.rest) == ("fitted", "off", "on", "on", "on")
+    assert (b.sigma_sim, b.sim_corr, b.pace, b.home, b.rest, b.calib) == ("fitted", "off", "on", "on", "on", CALIB)
 
 
 # every function that takes a setting, and the keyword it takes it by
 SIGNATURES = [
     (update.apply_game, {"engine": "exact", "pace": "on", "home": "on", "rest": "on"}),
     (update.record_game, {"engine": "exact", "sigma_update": "fitted", "sigma_sim": "fitted", "sim_corr": "off",
-                          "pace": "on", "home_mode": "on", "rest_mode": "on"}),
-    (update.log_prediction, {"sim_corr": "off", "pace": "on", "home": "on", "rest": "on"}),
+                          "pace": "on", "home_mode": "on", "rest_mode": "on", "calib": CALIB}),
+    (update.log_prediction, {"sim_corr": "off", "pace": "on", "home": "on", "rest": "on", "calib": CALIB}),
     (update.run_update, {"engine": "exact", "sigma_update": "fitted", "sigma_sim": "fitted", "sim_corr": "off",
-                         "pace": "on", "home": "on", "rest": "on", "m": 30}),
+                         "pace": "on", "home": "on", "rest": "on", "m": 30, "calib": CALIB}),
     (update.replay, {"engine": "exact", "sigma_update": "fitted", "sigma_sim": "fitted", "sim_corr": "off",
-                     "pace": "on", "home": "on", "rest": "on", "n": 20, "m": 30}),
+                     "pace": "on", "home": "on", "rest": "on", "n": 20, "m": 30, "calib": CALIB}),
     (update.trial, {"engine": "exact", "sigma_update": "fitted", "pace": "on", "home": "on", "rest": "on"}),
     (update.start_season, {"pace": "on", "n": 20}),
     (dynamic_model.run_training, {"engine": "exact", "sigma_update": "fitted", "pace": "on", "home": "on",
                                   "rest": "on"}),
-    (predict.predict_game, {"sim_corr": "off", "pace": "on", "home": "on", "rest": "on"}),
-    (simulation.simulate_factors, {"sim_corr": "off", "pace": "on", "home": "on", "rest": "on"}),
-    (build_site.build_predictions, {"sim_corr": "off", "pace": "on", "home": "on", "rest": "on"}),
-    (train_calibration.run_pass, {"rest": "on"}),
+    (predict.predict_game, {"sim_corr": "off", "pace": "on", "home": "on", "rest": "on", "calib": CALIB}),
+    (simulation.simulate_factors, {"sim_corr": "off", "pace": "on", "home": "on", "rest": "on", "calib": CALIB}),
+    (build_site.build_predictions, {"sim_corr": "off", "pace": "on", "home": "on", "rest": "on", "calib": CALIB}),
+    (train_calibration.run_pass, {"rest": "on", "calib": CALIB}),
     (params.update_sigma, {"mode": "fitted"}),
     (params.sim_sigma, {"mode": "fitted"}),
 ]

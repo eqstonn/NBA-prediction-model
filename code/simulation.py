@@ -24,6 +24,10 @@ nothing, so the draws are the same numbers as before.
 rest "on" (Phase 9, default "on"): each side's matchup expectation also gets the rest effect
 (model_params.json["rest"]) from both teams' rest, rest_a / rest_b ("b2b", "1", "2+"; see
 rest.py), added to the home boost. "off" adds nothing.
+
+calib "on" (Phase 10b, default "off"): the win % from the draws, P, is reported as
+Phi(a * Phi^-1(P)) (params.calibrate_win_prob, temperature a from model_params.json["calib"]);
+the draws, scores and margin SD are unchanged, and "team_a_win_pct_raw" keeps P.
 """
 import json
 
@@ -116,7 +120,8 @@ def points(g: dict, possessions, constants=None):
 def simulate_factors(team_a, team_b, data: dict, seed=None, sigma=None,
                      sim_corr: str = params.DEFAULT_SIM_CORR_MODE, pace: str = params.DEFAULT_PACE_MODE,
                      home: str = params.DEFAULT_HOME_MODE, neutral: bool = False,
-                     rest: str = params.DEFAULT_REST_MODE, rest_a=None, rest_b=None):
+                     rest: str = params.DEFAULT_REST_MODE, rest_a=None, rest_b=None,
+                     calib: str = params.DEFAULT_CALIB_MODE, pace_sigma=None):
     """
     Simulate team_a vs team_b from the curves in `data` (priors). seed=None: fresh randomness
     (website); an int: reproducible (prediction log). sigma: {factor: game noise}, default
@@ -124,11 +129,14 @@ def simulate_factors(team_a, team_b, data: dict, seed=None, sigma=None,
     home "on": team_a is the home team; its offensive line gets the home boost's "offense"
     shifts and team_b's line the "defense" shifts (params.home_offsets), unless neutral=True.
     rest "on": both lines also get the rest effect from rest_a / rest_b (params.rest_offsets).
+    calib "on": the win % is calibrated (params.calibrate_win_prob); team_b's is 100 minus team_a's.
+    pace_sigma: overrides the game's pace noise (default params.pace_sigma(); fit_calib.py's diagnosis).
     """
     n_sim = N_SIM
     rng = np.random.default_rng(seed)
     sigma = params.check_sigma(sigma) if sigma is not None else params.sim_sigma()
     corr = params.sim_corr(sim_corr)
+    with_calib = params.is_on(calib, "calib")
     with_pace = params.is_on(pace, "pace")
     offset_a, offset_b = params.home_offsets(home, neutral)
     if params.is_on(rest, "rest"):
@@ -149,7 +157,7 @@ def simulate_factors(team_a, team_b, data: dict, seed=None, sigma=None,
         a_game, b_game = correlated_factors(rng, a, b, sigma, corr, n_sim, offset_a, offset_b)
 
     if with_pace:
-        possessions = draw_possessions(rng, a, b, params.pace_sigma(), n_sim)
+        possessions = draw_possessions(rng, a, b, params.pace_sigma() if pace_sigma is None else pace_sigma, n_sim)
         constants = params.points_params()
         a_points, b_points = points(a_game, possessions, constants), points(b_game, possessions, constants)
     else:
@@ -164,12 +172,19 @@ def simulate_factors(team_a, team_b, data: dict, seed=None, sigma=None,
 
     a_win_pct = np.sum(a_games_won)
     b_win_pct = np.sum(b_games_won)
+    raw_a = (a_win_pct / n_sim) * 100   # Convert raw count to percentage
+    if with_calib:
+        team_a_pct = 100 * params.calibrate_win_prob(raw_a / 100, calib)
+        team_b_pct = 100 - team_a_pct
+    else:
+        team_a_pct, team_b_pct = raw_a, (b_win_pct / n_sim) * 100
 
     return {
         "team_a_avg_score": a_mean_points,
         "team_b_avg_score": b_mean_points,
-        "team_a_win_pct": (a_win_pct / n_sim) * 100,  # Convert raw count to percentage
-        "team_b_win_pct": (b_win_pct / n_sim) * 100,
+        "team_a_win_pct": team_a_pct,
+        "team_b_win_pct": team_b_pct,
+        "team_a_win_pct_raw": raw_a,                      # before any calibration
         "margin_sd": float(np.std(a_points - b_points)),   # spread of the simulated final margins
         "possessions": float(np.mean(possessions)),
     }

@@ -42,6 +42,10 @@ python code/lines.py --closing                           # print each finished g
 python code/historical_lines.py                          # match stats/betting/nba_2008-2026.csv (Kaggle) to the training games; --out to save
 python code/report.py                                    # accuracy report vs Vegas + baselines -> reports/accuracy_report.md + calibration.png (~1.5 min)
 python code/backtest.py                                  # live-procedure backtest of 2024-25 + 2025-26 (prints accuracy / Brier per season, ~1 min)
+python code/fit_calib.py --diagnose                      # Phase 10b: where the underconfidence comes from (~3 min, writes nothing)
+python code/fit_calib.py --overwrite                     # refit the win-probability temperature on 2024-25 -> model_params.json["calib"] (~25 s)
+python code/fit_calib.py --evaluate --old-log log_pace-home-rest.csv --new-log log_calib.csv   # test on 2025-26 + 2026-27
+python code/update.py --replay --from priors_pre_2026-27_pace-home-rest.json --out x.json --log x.csv --calib on   # = log_calib.csv
 python code/update.py --trial 5                          # DRY RUN: first 5 games of 2026-27 in memory; prints mean changes + timing, writes nothing
 python code/update.py --trial 5 --m 20                   # same with per-game drift tau = 0.1/20 (default M=30)
 python code/update.py --replay --from priors_pre_2026-27_pace-home-rest.json --out x.json --log x.csv
@@ -68,6 +72,8 @@ python code/train_calibration.py --variants live --rest off on   # the live mode
 # Home court (Phase 8): --home on|off (update.py, dynamic_model.py, build_site.py).
 # Rest (Phase 9): --rest on|off (update.py, dynamic_model.py, build_site.py; train_calibration.py --rest off on),
 #        default on (live since the rest switch).
+# Calibration (Phase 10b): --calib on|off (update.py, build_site.py, backtest.py, report.py; train_calibration.py
+#        --calib off on), default OFF (not live; waiting on the user's decision).
 # --replay and dynamic_model.py never replace an existing output file unless you pass --overwrite.
 
 python -m pytest tests                                   # tests (~95 s; real PyMC fits + a fake NBA.com; never touch the real priors.json)
@@ -154,6 +160,15 @@ All code is in `code/` as flat scripts that import each other by bare module nam
 - **Closing line** (`closing_line(s)`) = a game's last snapshot with `fetched_at` < tip-off (the `tipoff_utc` of its newest snapshot). A morning `--update` only gives the morning line; run `python code/lines.py` near tip-off for real closing lines.
 - `update.py --update` takes one snapshot after listing games (`--lines on|off`, default on, only with `--update`). No key or a failed request prints a `WARNING` and the update goes on; `run_update` returns it as `"lines"`. Tests: conftest's autouse fixture removes the key, makes `_download_odds` raise and points the lines files at a temp folder.
 - **`historical_lines.py`**: the training seasons' lines from Kaggle "NBA Betting Data | October 2007 to June 2026" (`cviaxmiwnptr`, `nba_2008-2026.csv`, needs a Kaggle login, put at `stats/betting/`). Spread + total for every game; **moneylines are empty from mid 2022-23 on**. Matched by (date, home, away) to the training games (NBA vs NBA, 3,956): **100% matched** (checked 2026-11-19). 5 score disagreements are data errors, not other games (NBA.com checked); the 6 extra betting rows are the 2023/2024 Cup finals and the 4 games the Kaggle training CSV lacks.
+
+**Win-probability calibration (Phase 10b; `--calib`, default off, NOT live):**
+- **Problem:** in the live-procedure backtest the model is underconfident: confidence 62.5% vs 66.5% accuracy, in almost every bin.
+- **Diagnosis** (`fit_calib.py --diagnose`, both backtest seasons): simulated margin SD 16.2 vs real margins 14.6 from the projection (RMS). The simulated variance is 94% factor game noise, 6% rating uncertainty, 0% pace noise, so scaling rating uncertainty or pace can't fix it (with no rating uncertainty at all the SD is still 15.7). The per-factor game noise is about right: live one-step-ahead residuals have 91–98% of the predicted variance (no double counting worth fixing). The calibrated P is ≈ Φ(proj / 11.9) instead of ≈ Φ(proj / 16.2), and the gap has three similar parts: (1) independent factor noise draws (real errors partly cancel in the margin; `--sim-corr on` narrows 2024-25 to 14.95 vs 14.27 real but still needs a temperature of 1.24); (2) projected margins too small, actual = 1.11 × projected (the ratings under-react: an update question, N / M / update σ); (3) fat-tailed real margins.
+- **Fix:** no single noise cause, so a post-hoc probit temperature, P' = Φ(a·Φ⁻¹(P)) (`params.calibrate_win_prob`, applied in `simulate_factors`; P is clipped to [5e-5, 1 − 5e-5]). It is monotone (same picks, same accuracy) and leaves the scores and margin SD alone; `team_a_win_pct_raw` keeps P. `--replay --calib on` ends in the same priors (`priors_2026-27_calib.json` == `priors_2026-27_pace-home-rest.json`).
+- **Fit:** `model_params.json["calib"]`, a = **1.3612 (SE 0.0968)**, maximum likelihood on the 2024-25 live-procedure backtest only (1,316 games; log-lik −806.76 → −799.54), for the live simulation settings.
+- **Tests:** 2025-26 backtest (1,322): conf − acc −4.0 → −0.2 pts, Brier 0.2145 → 0.2122 (**−0.0023 ± 0.0010, −2.2 SE**), log loss −0.0047 ± 0.0029. 2026-27 (`log_calib.csv` vs `log_pace-home-rest.csv`, 210): conf − acc −5.1 → −1.2, Brier 0.2110 → 0.2082 (**−0.0028 ± 0.0025, −1.1 SE**), log loss −0.0071 ± 0.0070. Accuracy and spread MAE identical everywhere.
+- **Training-pass check** (`train_calibration.py --variants live --calib off on`): calibration makes that setup overconfident (+3.9 pts) and worse (+0.0017 Brier, 2.2 SE). Expected: the training pass's ratings are stale and its projections too spread (slope 0.89 vs 1.11 live), so the temperature only applies to the live procedure.
+- `applied_games.json` entries record `calib` for games applied from now on (the 210 earlier ones don't have the key; `test_live.py` keeps `calib` out of `LIVE` for that reason).
 
 **Accuracy report (Phase 10):** `report.py` reads only (training CSV, Kaggle betting CSV, the prediction logs, `data/lines_2026-27.csv`) and writes only `reports/accuracy_report.md` + `reports/calibration.png` (matplotlib, Agg backend).
 - **Predictors:** the live model; Vegas = Φ(−spread_home / SD) with SD = RMS(margin + spread) over the 3,956 training games (**13.83**, mean residual −0.09); Vegas moneyline (no vig) only where `lines.py` saved one (none in training: the Kaggle moneylines stop in 2022-23); always home (P = training home win rate 0.549); better record so far in the season (earlier days only, P = 0.649, ties → home).
