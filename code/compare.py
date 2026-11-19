@@ -6,7 +6,9 @@ Side-by-side accuracy of two or more prediction logs (predlog.py format).
 Metrics are computed over the games that are in EVERY log, so each column is scored on
 the same games; how many games each log has in total is shown too. The best value in
 each row is marked with *. "avg confidence" (mean win % of the predicted winner) has no
-best: a model is well calibrated when it matches its winner accuracy.
+best: a model is well calibrated when it matches its winner accuracy. Likewise "projected
+total" should match "actual total", and "margin error SD" (how far real margins land from
+the projected margin) is what the simulation's own margin spread should be.
 """
 import argparse
 import sys
@@ -19,6 +21,9 @@ ROWS = [  # (label, metric key, format, higher is better; None = no "best")
     ("avg confidence", "confidence", "{:.1%}", None),   # compare with the accuracy: calibration
     ("spread MAE (pts)", "spread_mae", "{:.2f}", False),
     ("Brier score", "brier", "{:.4f}", False),
+    ("projected total", "proj_total", "{:.1f}", None),   # compare with the actual total: bias
+    ("actual total", "actual_total", "{:.1f}", None),
+    ("margin error SD", "margin_sd", "{:.2f}", None),    # SD of actual - projected margin
 ]
 
 

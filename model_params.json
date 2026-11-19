@@ -35,5 +35,161 @@
             "FTR": 1.0049
         },
         "fitted": "2026-11-18"
+    },
+    "factor_corr": {
+        "labels": [
+            "team eFG",
+            "team TOV",
+            "team ORB",
+            "team FTR",
+            "opponent eFG",
+            "opponent TOV",
+            "opponent ORB",
+            "opponent FTR"
+        ],
+        "matrix": [
+            [
+                1.0,
+                0.022,
+                -0.0605,
+                -0.0261,
+                0.0331,
+                -0.0485,
+                -0.0031,
+                -0.0278
+            ],
+            [
+                0.022,
+                1.0,
+                0.2002,
+                0.0674,
+                -0.0485,
+                0.0516,
+                -0.0155,
+                -0.044
+            ],
+            [
+                -0.0605,
+                0.2002,
+                1.0,
+                0.0063,
+                -0.0031,
+                -0.0155,
+                -0.0029,
+                0.0265
+            ],
+            [
+                -0.0261,
+                0.0674,
+                0.0063,
+                1.0,
+                -0.0278,
+                -0.044,
+                0.0265,
+                0.1362
+            ],
+            [
+                0.0331,
+                -0.0485,
+                -0.0031,
+                -0.0278,
+                1.0,
+                0.022,
+                -0.0605,
+                -0.0261
+            ],
+            [
+                -0.0485,
+                0.0516,
+                -0.0155,
+                -0.044,
+                0.022,
+                1.0,
+                0.2002,
+                0.0674
+            ],
+            [
+                -0.0031,
+                -0.0155,
+                -0.0029,
+                0.0265,
+                -0.0605,
+                0.2002,
+                1.0,
+                0.0063
+            ],
+            [
+                -0.0278,
+                -0.044,
+                0.0265,
+                0.1362,
+                -0.0261,
+                0.0674,
+                0.0063,
+                1.0
+            ]
+        ],
+        "fit": {
+            "method": "correlation of the standardized one-step-ahead residuals of the exact training pass (flat start, tau=0, fitted sigma); one sample per game = the team's and the opponent's 4 residuals, each game in both orders; NBA-vs-NBA games after a one-season burn-in",
+            "data": {
+                "csv": "TeamStatisticsExtended.csv",
+                "before": "2026-10-03",
+                "years": 3,
+                "games": 3963,
+                "first": "2023-10-24",
+                "last": "2026-06-13"
+            },
+            "games_used": 2636,
+            "burn_in_games": 1320,
+            "max_abs_change_without_burn_in": 0.0196,
+            "fitted": "2026-11-18"
+        }
+    },
+    "points": {
+        "ft_pct": 0.7819,
+        "possession_offset": 2.071,
+        "rebound_chances": 0.9204,
+        "formula": "FGA = (possessions + possession_offset) (1 - TOV) / (1 + 0.44 FTR - rebound_chances ORB (1 - eFG)); points = FGA (2 eFG + FTR ft_pct)",
+        "fit": {
+            "method": "NBA.com definitions solved for FGA; ft_pct = league FTM/FTA, possession_offset = mean(FGA + 0.44 FTA + TOV - ORB - possessions), rebound_chances = sum ORB / sum ORB% FGA (1 - eFG); NBA-vs-NBA rows",
+            "data": {
+                "csv": "TeamStatisticsExtended.csv",
+                "before": "2026-10-03",
+                "years": 3,
+                "games": 3963,
+                "first": "2023-10-24",
+                "last": "2026-06-13"
+            },
+            "check_on_actual_factors_and_possessions": {
+                "games": 3956,
+                "actual_game_total": 228.06,
+                "game_total_bias": -0.13,
+                "game_total_mae": 3.09,
+                "legacy_bias_actual_possessions": 21.58,
+                "legacy_bias_100_possessions": 21.78,
+                "possessions_per_team_game": 99.91
+            },
+            "fitted": "2026-11-18"
+        }
+    },
+    "pace": {
+        "sigma": 4.84,
+        "start_mean": 99.91,
+        "start_std": 5.0,
+        "fit": {
+            "method": "maximum of the one-step-ahead predictive log-likelihood of the exact pace training pass (flat start, tau=0), possessions = average of the two teams' counts; scored on NBA-vs-NBA games; grid 0.5-15 step 0.25, then +-0.25 in steps of 0.01",
+            "data": {
+                "csv": "TeamStatisticsExtended.csv",
+                "before": "2026-10-03",
+                "years": 3,
+                "games": 3963,
+                "first": "2023-10-24",
+                "last": "2026-06-13"
+            },
+            "games_scored": 3956,
+            "log_likelihood": -11911.42,
+            "mean_squared_standardized_residual": 0.997,
+            "fitted": "2026-11-18"
+        }
     }
 }

@@ -59,10 +59,18 @@ def test_brier_hand_computed_on_3_game_toy_log(tmp_path):
     assert m["confidence"] == pytest.approx((0.70 + 0.60 + 0.55) / 3)
     assert m["spread_mae"] == pytest.approx((5 + 6 + 8) / 3)
     assert m["games"] == 3
+    # totals: projected 210, 204, 214; actual 205, 200, 230
+    assert m["proj_total"] == pytest.approx((210 + 204 + 214) / 3)
+    assert m["actual_total"] == pytest.approx((205 + 200 + 230) / 3)
+    # margin errors (actual - projected): 5 - 10 = -5, 2 - (-4) = 6, 10 - 2 = 8 -> population SD
+    errors = [-5, 6, 8]
+    mean = sum(errors) / 3
+    assert m["margin_sd"] == pytest.approx((sum((e - mean) ** 2 for e in errors) / 3) ** 0.5)
 
 
 def test_metrics_of_empty_log():
-    assert predlog.metrics([]) == {"games": 0, "accuracy": None, "confidence": None, "spread_mae": None, "brier": None}
+    assert predlog.metrics([]) == {"games": 0, "accuracy": None, "confidence": None, "spread_mae": None, "brier": None,
+                                   "proj_total": None, "actual_total": None, "margin_sd": None}
 
 
 def test_append_rows_never_duplicates(tmp_path):
@@ -94,10 +102,10 @@ def test_update_logs_each_game_before_it_is_applied(env, monkeypatch):
     calls = []
     real_predict = update.predict_game
 
-    def spy(home_id, away_id, priors, seed=None, sigma=None):
+    def spy(home_id, away_id, priors, seed=None, sigma=None, **kwargs):
         on_disk = json.loads(update.PRIORS_PATH.read_text(encoding="utf-8"))
         calls.append({"same_as_saved": priors == on_disk, "applied": set(env.applied()), "seed": seed})
-        return real_predict(home_id, away_id, priors, seed=seed, sigma=sigma)
+        return real_predict(home_id, away_id, priors, seed=seed, sigma=sigma, **kwargs)
 
     monkeypatch.setattr(update, "predict_game", spy)
     update.run_update()

@@ -12,8 +12,20 @@ Defaults: fitted for the UPDATE, legacy for the SIMULATION. That split scored be
 2026-27 (Brier 0.2057). With the fitted sigma, the simulation draws the four factors
 independently and spreads final margins too wide (SD 19.9 pts vs 15.5 real), so its
 win probabilities are too timid. Legacy for both reproduces log_exact.csv exactly.
+
+Simulation switches (Phase 7), each "on" or "off", default "off" (= the old simulation):
+
+  sim_corr  draw the 8 game factors (both teams' eFG/TOV/ORB/FTR) jointly with the
+            correlation in model_params.json["factor_corr"] instead of independently
+  pace      possessions from the two teams' pace curves (priors[team]["pace"]) plus game
+            noise model_params.json["pace"]["sigma"], and the corrected points formula
+            (model_params.json["points"]); off = 100 possessions and the old formula
+
+Both off with legacy sim sigma reproduces log_sigma-update.csv exactly.
+code/fit_sim.py estimates factor_corr, points and pace from the training data only.
 """
 import json
+import math
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -26,6 +38,12 @@ DEFAULT_SIM_SIGMA_MODE = "legacy"
 
 LEGACY_UPDATE_SIGMA = {"eFG": 0.05, "TOV": 0.05, "ORB": 0.05, "FTR": 0.05}
 LEGACY_SIM_SIGMA = {"eFG": 0.05, "TOV": 0.02, "ORB": 0.05, "FTR": 0.02}
+
+SWITCH_MODES = ("on", "off")
+DEFAULT_SIM_CORR_MODE = "off"
+DEFAULT_PACE_MODE = "off"
+# rows/columns of the factor correlation: the team's offensive line, then the opponent's
+CORR_LABELS = tuple(f"team {f}" for f in FACTORS) + tuple(f"opponent {f}" for f in FACTORS)
 
 _cache = {}
 
@@ -67,3 +85,85 @@ def sim_sigma(mode: str = DEFAULT_SIM_SIGMA_MODE) -> dict:
     """Game noise used by the Monte Carlo simulation, per factor (default: legacy)."""
     _check_mode(mode)
     return fitted_sigma() if mode == "fitted" else dict(LEGACY_SIM_SIGMA)
+
+
+# ---------------------------------------------------------------------------
+# Phase 7: correlated factors, pace, points formula
+# ---------------------------------------------------------------------------
+
+def is_on(mode: str, what: str = "switch") -> bool:
+    """True for "on", False for "off"; anything else is an error."""
+    if mode not in SWITCH_MODES:
+        raise ValueError(f"unknown {what} setting {mode!r}; use one of {SWITCH_MODES}")
+    return mode == "on"
+
+
+def section(name: str) -> dict:
+    data = load_params()
+    if name not in data:
+        raise KeyError(f"{PARAMS_PATH.name} has no {name!r} section; run python code/fit_sim.py")
+    return data[name]
+
+
+def check_corr(matrix) -> list:
+    """An 8x8 correlation matrix (CORR_LABELS order): symmetric, unit diagonal, entries in [-1, 1]."""
+    n = len(CORR_LABELS)
+    if len(matrix) != n or any(len(row) != n for row in matrix):
+        raise ValueError(f"factor correlation must be {n}x{n}")
+    for i in range(n):
+        if abs(matrix[i][i] - 1) > 1e-9:
+            raise ValueError("factor correlation must have 1 on the diagonal")
+        for j in range(n):
+            if abs(matrix[i][j] - matrix[j][i]) > 1e-9 or not -1 <= matrix[i][j] <= 1:
+                raise ValueError("factor correlation must be symmetric with entries in [-1, 1]")
+    return [[float(v) for v in row] for row in matrix]
+
+
+def factor_corr() -> list:
+    """The fitted 8x8 correlation of the game factors' noise (model_params.json["factor_corr"])."""
+    return check_corr(section("factor_corr")["matrix"])
+
+
+def sim_corr(mode: str = DEFAULT_SIM_CORR_MODE):
+    """The correlation matrix the simulation draws with: None when off (independent draws)."""
+    return factor_corr() if is_on(mode, "sim_corr") else None
+
+
+def points_params() -> dict:
+    """Constants of the corrected points formula: {"ft_pct", "possession_offset", "rebound_chances"}."""
+    p = section("points")
+    return {k: float(p[k]) for k in ("ft_pct", "possession_offset", "rebound_chances")}
+
+
+def pace_params() -> dict:
+    """{"sigma": game noise in possessions, "start_mean", "start_std": training's flat start}."""
+    p = section("pace")
+    out = {k: float(p[k]) for k in ("sigma", "start_mean", "start_std")}
+    if not all(v > 0 for v in out.values()):
+        raise ValueError(f"pace parameters must be positive, got {out}")
+    return out
+
+
+def pace_sigma() -> float:
+    return pace_params()["sigma"]
+
+
+def pace_scale() -> float:
+    """
+    Season reset / drift scale for pace, the same rule as the ratings in pace units:
+    ratings use 0.1 = 2 x the legacy factor noise 0.05 (std 0.1/sqrt(N), tau 0.1/M), so
+    pace uses 2 x its own game noise (std 2 sigma_pace / sqrt(N), tau 2 sigma_pace / M).
+    """
+    return 2 * pace_sigma()
+
+
+def pace_season_std(n: int) -> float:
+    if n <= 0:
+        raise ValueError(f"n must be a positive integer, got {n}")
+    return pace_scale() / math.sqrt(n)
+
+
+def pace_tau(m: int) -> float:
+    if m <= 0:
+        raise ValueError(f"m must be a positive integer, got {m}")
+    return pace_scale() / m

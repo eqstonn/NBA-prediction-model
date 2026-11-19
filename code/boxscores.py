@@ -6,6 +6,7 @@ Data sources (all https://stats.nba.com/stats/<endpoint>, through the nba_api li
     leaguegamelog          LeagueGameLog          finished games per season type
     scheduleleaguev2       ScheduleLeagueV2       the whole season schedule, with gameStatus 3 = final
     boxscorefourfactorsv3  BoxScoreFourFactorsV3  each game's official four factors
+    boxscoreadvancedv3     BoxScoreAdvancedV3     each team's possessions (only with --pace on)
 
 Which games count
 -----------------
@@ -35,6 +36,13 @@ its own possession count, so simple formulas are off by up to ~0.05.
 Complete box scores are cached in stats/boxscores/<gameId>.json, so reruns don't
 download them again. Every request is retried with backoff (2 s, 4 s, 8 s).
 
+Possessions
+-----------
+For pace (Phase 7), get_game_possessions reads each team's "possessions" from NBA.com's
+advanced box score (BoxScoreAdvancedV3, the source of the Kaggle "possessions" column),
+cached the same way in stats/boxscores_advanced/<gameId>.json. A game's possessions are
+the average of the two teams' counts (they differ by about 1).
+
 A game with its factors looks like:
     {
         "game_id": "0022600001",        # NBA.com gameId (not an ESPN event id)
@@ -51,10 +59,11 @@ import os
 import time
 from pathlib import Path
 
-from nba_api.stats.endpoints import boxscorefourfactorsv3, leaguegamelog, scheduleleaguev2
+from nba_api.stats.endpoints import boxscoreadvancedv3, boxscorefourfactorsv3, leaguegamelog, scheduleleaguev2
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CACHE_DIR = REPO_ROOT / "stats" / "boxscores"
+ADVANCED_CACHE_DIR = REPO_ROOT / "stats" / "boxscores_advanced"
 
 SEASON = "2026-27"
 OPENING_NIGHT = "2026-10-20"
@@ -75,7 +84,7 @@ _last_request = 0.0
 
 
 # ---------------------------------------------------------------------------
-# network (the only three functions that talk to NBA.com)
+# network (the only four functions that talk to NBA.com)
 # ---------------------------------------------------------------------------
 
 def _download_game_log(season: str, season_type: str) -> dict:
@@ -89,6 +98,10 @@ def _download_schedule(season: str) -> dict:
 
 def _download_box_score(game_id: str) -> dict:
     return boxscorefourfactorsv3.BoxScoreFourFactorsV3(game_id=game_id, timeout=TIMEOUT).get_dict()
+
+
+def _download_advanced_box_score(game_id: str) -> dict:
+    return boxscoreadvancedv3.BoxScoreAdvancedV3(game_id=game_id, timeout=TIMEOUT).get_dict()
 
 
 def _throttle():
@@ -285,6 +298,66 @@ def get_game_factors(game_id: str):
     tmp.write_text(json.dumps(raw), encoding="utf-8")
     os.replace(tmp, path)
     return factors, None
+
+
+# ---------------------------------------------------------------------------
+# possessions (cached; pace only)
+# ---------------------------------------------------------------------------
+
+def parse_possessions(raw: dict):
+    """{"home": {"id", "possessions"}, "away": {...}}, or None if either team's count is missing or implausible."""
+    try:
+        box = raw["boxScoreAdvanced"]
+        out = {}
+        for side, key in (("home", "homeTeam"), ("away", "awayTeam")):
+            value = box[key]["statistics"].get("possessions")
+            if not (isinstance(value, (int, float)) and not isinstance(value, bool) and 50 <= value <= 200):
+                return None
+            out[side] = {"id": str(box[key]["teamId"]), "possessions": float(value)}
+        return out
+    except (KeyError, TypeError):
+        return None
+
+
+def game_possessions(possessions: dict) -> float:
+    """A game's possessions: the average of the two teams' counts."""
+    return (possessions["home"]["possessions"] + possessions["away"]["possessions"]) / 2
+
+
+def get_game_possessions(game_id: str):
+    """
+    (possessions, None) for a game (parse_possessions shape), or (None, reason).
+    Reads stats/boxscores_advanced/<gameId>.json if present; otherwise downloads (with
+    retries) and caches the advanced box score, but only when both teams' counts are there.
+    """
+    path = Path(ADVANCED_CACHE_DIR) / f"{game_id}.json"
+    if path.exists():
+        possessions = parse_possessions(json.loads(path.read_text(encoding="utf-8")))
+        if possessions is not None:
+            return possessions, None
+
+    try:
+        raw = with_retries(_download_advanced_box_score, game_id, what=f"advanced box score {game_id}")
+    except Exception as err:
+        return None, f"advanced box score download failed {RETRIES} times ({type(err).__name__})"
+
+    possessions = parse_possessions(raw)
+    if possessions is None:
+        return None, "possessions missing for at least one team"
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(raw), encoding="utf-8")
+    os.replace(tmp, path)
+    return possessions, None
+
+
+def with_possessions(game: dict, possessions: dict) -> dict:
+    """The game with "possessions" (the game's average) filled in (checks the teams match)."""
+    for side in ("home", "away"):
+        if possessions[side]["id"] != game[side]["id"]:
+            raise ValueError(f"game {game['game_id']}: {side} team differs between game and advanced box score")
+    return {**game, "possessions": game_possessions(possessions)}
 
 
 def with_factors(game: dict, factors: dict) -> dict:

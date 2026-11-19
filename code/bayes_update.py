@@ -23,6 +23,10 @@ Two engines compute that posterior:
   "pymc"             the original PyMC model, sampled with NUTS: the same answer plus
                      sampling noise (median 0.0012 off over a season), ~2 s per call
 Both write back each curve's own (marginal) mean and std.
+
+Pace (Phase 7): update_pace updates both teams' pace curves (priors[team]["pace"]) from a
+game's possessions with the same exact formula (conjugate_pair), pace_a and pace_b in
+place of offense and defense.
 """
 import math
 import os
@@ -57,23 +61,31 @@ def predictive(prior: dict, f: str, sigma: dict):
     return (m_o + m_d) / 2, (s_o ** 2 + s_d ** 2) / 4 + sigma[f] ** 2
 
 
+def conjugate_pair(m_1: float, s_1: float, m_2: float, s_2: float, y: float, sigma: float):
+    """
+    Exact posterior of two Normal curves x1 ~ N(m_1, s_1^2), x2 ~ N(m_2, s_2^2) after one
+    observation y ~ N((x1 + x2) / 2, sigma^2):
+        V        = (s_1^2 + s_2^2) / 4 + sigma^2      variance of the observation before the game
+        surprise = y - (m_1 + m_2) / 2
+        m_i'     = m_i + (s_i^2 / 2) / V * surprise
+        s_i'     = sqrt(s_i^2 - (s_i^2 / 2)^2 / V)
+    Returns ((m_1', s_1'), (m_2', s_2')). Used for every factor (offense + defense) and for pace.
+    """
+    v = (s_1 ** 2 + s_2 ** 2) / 4 + sigma ** 2
+    surprise = y - (m_1 + m_2) / 2
+    out = []
+    for m, s in ((m_1, s_1), (m_2, s_2)):
+        covariance = s ** 2 / 2   # between this curve and the observation
+        out.append((m + covariance / v * surprise, math.sqrt(s ** 2 - covariance ** 2 / v)))
+    return tuple(out)
+
+
 def _fit_exact(prior: dict, observed: dict, sigma: dict) -> dict:
-    """
-    Closed-form posterior of the model above, per factor:
-        V        = (s_o^2 + s_d^2) / 4 + sigma_f^2    variance of the observation before the game
-        surprise = y - (m_o + m_d) / 2
-        m_o'     = m_o + (s_o^2 / 2) / V * surprise
-        s_o'     = sqrt(s_o^2 - (s_o^2 / 2)^2 / V)
-    and the same for the defense with s_d.
-    """
+    """Closed-form posterior of the model above, per factor (conjugate_pair with offense and defense)."""
     out = {"o": {}, "d": {}}
     for f in FACTORS:
         (m_o, s_o), (m_d, s_d) = prior["o"][f], prior["d"][f]
-        v = (s_o ** 2 + s_d ** 2) / 4 + sigma[f] ** 2
-        surprise = observed[f] - (m_o + m_d) / 2
-        for side, m, s in (("o", m_o, s_o), ("d", m_d, s_d)):
-            covariance = s ** 2 / 2   # between this curve and the observation
-            out[side][f] = (m + covariance / v * surprise, math.sqrt(s ** 2 - covariance ** 2 / v))
+        out["o"][f], out["d"][f] = conjugate_pair(m_o, s_o, m_d, s_d, observed[f], sigma[f])
     return out
 
 
@@ -138,4 +150,34 @@ def update_game(priors: dict, game: dict, tau: float = 0.0, random_seed=None, en
     for f in FACTORS:
         offense[f]["mean"], offense[f]["std"] = posterior["o"][f]
         defense[f]["mean"], defense[f]["std"] = posterior["d"][f]
+    return priors
+
+
+# ---------------------------------------------------------------------------
+# pace (Phase 7)
+# ---------------------------------------------------------------------------
+
+def pace_predictive(priors: dict, team_a: str, team_b: str, sigma: float):
+    """(mean, variance) of a game's possessions before it: ((p_a + p_b)/2, (s_a^2 + s_b^2)/4 + sigma^2)."""
+    a, b = priors[str(team_a)]["pace"], priors[str(team_b)]["pace"]
+    return (a["mean"] + b["mean"]) / 2, (a["std"] ** 2 + b["std"] ** 2) / 4 + sigma ** 2
+
+
+def update_pace(priors: dict, team_a: str, team_b: str, possessions: float, tau: float = 0.0, sigma=None) -> dict:
+    """
+    Update both teams' pace curves in place from one game's possessions; returns `priors`.
+
+    Model (the same shape as one factor): pace_a ~ N(m_a, s_a^2), pace_b ~ N(m_b, s_b^2),
+    possessions ~ N((pace_a + pace_b) / 2, sigma^2), solved exactly with conjugate_pair.
+    tau > 0 first widens both curves to sqrt(std^2 + tau^2), once per game.
+    sigma: game noise in possessions; None = model_params.json["pace"]["sigma"].
+    """
+    sigma = params.pace_sigma() if sigma is None else float(sigma)
+    if not sigma > 0:
+        raise ValueError(f"pace sigma must be positive, got {sigma}")
+    a, b = priors[str(team_a)]["pace"], priors[str(team_b)]["pace"]
+    s_a = widen(a["std"], tau) if tau else a["std"]
+    s_b = widen(b["std"], tau) if tau else b["std"]
+    (a["mean"], a["std"]), (b["mean"], b["std"]) = conjugate_pair(a["mean"], s_a, b["mean"], s_b,
+                                                                 float(possessions), sigma)
     return priors

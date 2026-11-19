@@ -1,70 +1,134 @@
-#find todays game via nba api
-#grab the offense and deffense bell curves of team a and team b
-#using numpy, 
-import numpy as np
+"""
+Monte Carlo simulation of one game from two teams' curves (10,000 draws).
+
+Per draw:
+  1. each side's matchup expectation per factor: (team offense + opponent defense) / 2, with
+     the offense and defense values drawn from their curves (rating uncertainty)
+  2. game noise on top, sigma_f per factor (params.sim_sigma(): legacy by default)
+       sim_corr "off" (default)  every one of the 8 game factors gets independent noise
+       sim_corr "on"             the 8 noises are drawn jointly with model_params.json's
+                                 factor correlation (both teams, both sides of the ball)
+  3. points from the four factors
+       pace "off" (default)  100 possessions and the original formula
+                             possessions (1 - TOV)(1 + ORB (1 - eFG)) (2 eFG + 0.77 FTR):
+                             ~22 points per game too high (it ignores free-throw possessions)
+       pace "on"             possessions ~ N((pace_a + pace_b) / 2, sigma_pace^2) with each
+                             team's pace drawn from its curve, and the corrected formula
+                             points() (constants from model_params.json["points"])
+Both off = the original simulation, draw for draw (same seed, same numbers).
+"""
 import json
 
+import numpy as np
+
 import params
+
+N_SIM = 10000
+FACTORS = params.FACTORS
+LEGACY_PACE = 100       # the original fixed possessions per team
+LEGACY_FT_PCT = 0.77    # the original free-throw %
+
 
 def load_priors(file_path):
     with open(file_path, "r", encoding="utf-8") as file:
         data = json.load(file)
     return data
 
-def get_teams():
-    """
-    using nba api, grab the team ids of game.
-    """
-    pass
 
-def simulate_factors(team_a, team_b, data: dict, seed=None, sigma=None):
-    n_sim = 10000
-    rng = np.random.default_rng(seed)  # seed=None: fresh randomness (website); an int: reproducible (prediction log)
-    # game-to-game noise per factor. Default params.sim_sigma() = legacy (0.05 / 0.02 / 0.05 / 0.02):
-    # with the fitted sigma (model_params.json) these independent draws spread margins too wide.
+def _draw_curves(rng, curves: dict, n: int) -> dict:
+    """One draw per simulation from each factor's curve, in FACTORS order."""
+    return {f: rng.normal(loc=curves[f]["mean"], scale=curves[f]["std"], size=n) for f in FACTORS}
+
+
+def independent_factors(rng, a: dict, b: dict, sigma: dict, n: int = N_SIM):
+    """
+    The original draws, in the original order: A's offense, B's defense, A's game factors
+    (independent noise), then B's offense, A's defense, B's game factors.
+    Returns ({factor: A's values}, {factor: B's values}); A's are A's offensive line.
+    """
+    a_o = _draw_curves(rng, a["offense"], n)
+    b_d = _draw_curves(rng, b["defense"], n)
+    a_game = {f: rng.normal(loc=(a_o[f] + b_d[f]) / 2, scale=sigma[f], size=n) for f in FACTORS}
+    b_o = _draw_curves(rng, b["offense"], n)
+    a_d = _draw_curves(rng, a["defense"], n)
+    b_game = {f: rng.normal(loc=(b_o[f] + a_d[f]) / 2, scale=sigma[f], size=n) for f in FACTORS}
+    return a_game, b_game
+
+
+def correlated_factors(rng, a: dict, b: dict, sigma: dict, corr, n: int = N_SIM):
+    """
+    Like independent_factors, but the 8 game noises (A's eFG/TOV/ORB/FTR, then B's; the
+    order of params.CORR_LABELS) are one multivariate normal draw: sigma_f * (L z), L the
+    Cholesky factor of `corr`, z independent standard normals.
+    """
+    a_o = _draw_curves(rng, a["offense"], n)
+    b_d = _draw_curves(rng, b["defense"], n)
+    b_o = _draw_curves(rng, b["offense"], n)
+    a_d = _draw_curves(rng, a["defense"], n)
+    chol = np.linalg.cholesky(np.asarray(corr, dtype=float))
+    z = chol @ rng.standard_normal((len(params.CORR_LABELS), n))
+    k = len(FACTORS)
+    a_game = {f: (a_o[f] + b_d[f]) / 2 + sigma[f] * z[i] for i, f in enumerate(FACTORS)}
+    b_game = {f: (b_o[f] + a_d[f]) / 2 + sigma[f] * z[k + i] for i, f in enumerate(FACTORS)}
+    return a_game, b_game
+
+
+def draw_possessions(rng, a: dict, b: dict, sigma_pace: float, n: int = N_SIM):
+    """Game possessions per draw: each team's pace from its curve, then N((pace_a + pace_b) / 2, sigma_pace^2)."""
+    pace_a = rng.normal(loc=a["pace"]["mean"], scale=a["pace"]["std"], size=n)
+    pace_b = rng.normal(loc=b["pace"]["mean"], scale=b["pace"]["std"], size=n)
+    return rng.normal(loc=(pace_a + pace_b) / 2, scale=sigma_pace, size=n)
+
+
+def legacy_points(g: dict, possessions=LEGACY_PACE):
+    """The original formula (pace "off"): possessions (1 - TOV)(1 + ORB (1 - eFG)) shots, FT% 0.77."""
+    effective_pos = possessions * (1 - g["TOV"]) * (1 + (g["ORB"] * (1 - g["eFG"])))
+    return effective_pos * (2 * g["eFG"] + g["FTR"] * LEGACY_FT_PCT)
+
+
+def points(g: dict, possessions, constants=None):
+    """
+    The corrected formula (pace "on"), from NBA.com's definitions (see fit_sim.py):
+        FGA    = (possessions + offset)(1 - TOV) / (1 + 0.44 FTR - rebound_chances ORB (1 - eFG))
+        points = FGA (2 eFG + FTR ft_pct)
+    constants: params.points_params() by default.
+    """
+    c = constants or params.points_params()
+    fga = (possessions + c["possession_offset"]) * (1 - g["TOV"]) / (
+        1 + 0.44 * g["FTR"] - c["rebound_chances"] * g["ORB"] * (1 - g["eFG"]))
+    return fga * (2 * g["eFG"] + g["FTR"] * c["ft_pct"])
+
+
+def simulate_factors(team_a, team_b, data: dict, seed=None, sigma=None,
+                     sim_corr: str = params.DEFAULT_SIM_CORR_MODE, pace: str = params.DEFAULT_PACE_MODE):
+    """
+    Simulate team_a vs team_b from the curves in `data` (priors). seed=None: fresh randomness
+    (website); an int: reproducible (prediction log). sigma: {factor: game noise}, default
+    params.sim_sigma() (legacy). sim_corr / pace: "on" or "off" (see the module docstring).
+    """
+    n_sim = N_SIM
+    rng = np.random.default_rng(seed)
     sigma = params.check_sigma(sigma) if sigma is not None else params.sim_sigma()
+    corr = params.sim_corr(sim_corr)
+    with_pace = params.is_on(pace, "pace")
+    a, b = data[team_a], data[team_b]
+    if with_pace:
+        for team, curves in ((team_a, a), (team_b, b)):
+            if "pace" not in curves:
+                raise KeyError(f"team {team} has no pace curve; use priors trained with --pace on")
 
-    #find team a expected 4 factors in the game
-    a_o_eFG = rng.normal(loc = data[team_a]["offense"]["eFG"]["mean"], scale = data[team_a]["offense"]["eFG"]["std"], size = n_sim)
-    a_o_TOV = rng.normal(loc = data[team_a]["offense"]["TOV"]["mean"], scale = data[team_a]["offense"]["TOV"]["std"], size = n_sim)
-    a_o_ORB = rng.normal(loc = data[team_a]["offense"]["ORB"]["mean"], scale = data[team_a]["offense"]["ORB"]["std"], size = n_sim)
-    a_o_FTR = rng.normal(loc = data[team_a]["offense"]["FTR"]["mean"], scale = data[team_a]["offense"]["FTR"]["std"], size = n_sim)
+    if corr is None:
+        a_game, b_game = independent_factors(rng, a, b, sigma, n_sim)
+    else:
+        a_game, b_game = correlated_factors(rng, a, b, sigma, corr, n_sim)
 
-    b_d_eFG = rng.normal(loc = data[team_b]["defense"]["eFG"]["mean"], scale = data[team_b]["defense"]["eFG"]["std"], size = n_sim)
-    b_d_TOV = rng.normal(loc = data[team_b]["defense"]["TOV"]["mean"], scale = data[team_b]["defense"]["TOV"]["std"], size = n_sim)
-    b_d_ORB = rng.normal(loc = data[team_b]["defense"]["ORB"]["mean"], scale = data[team_b]["defense"]["ORB"]["std"], size = n_sim)
-    b_d_FTR = rng.normal(loc = data[team_b]["defense"]["FTR"]["mean"], scale = data[team_b]["defense"]["FTR"]["std"], size = n_sim)
-
-    a_expected_eFG = rng.normal(loc = (a_o_eFG + b_d_eFG ) / 2, scale = sigma["eFG"], size = n_sim)
-    a_expected_TOV = rng.normal(loc = (a_o_TOV + b_d_TOV ) / 2, scale = sigma["TOV"], size = n_sim)
-    a_expected_ORB = rng.normal(loc = (a_o_ORB + b_d_ORB ) / 2, scale = sigma["ORB"], size = n_sim)
-    a_expected_FTR = rng.normal(loc = (a_o_FTR + b_d_FTR ) / 2, scale = sigma["FTR"], size = n_sim)
-
-    #find team b expected 4 factors in the game
-    b_o_eFG = rng.normal(loc = data[team_b]["offense"]["eFG"]["mean"], scale = data[team_b]["offense"]["eFG"]["std"], size = n_sim)
-    b_o_TOV = rng.normal(loc = data[team_b]["offense"]["TOV"]["mean"], scale = data[team_b]["offense"]["TOV"]["std"], size = n_sim)
-    b_o_ORB = rng.normal(loc = data[team_b]["offense"]["ORB"]["mean"], scale = data[team_b]["offense"]["ORB"]["std"], size = n_sim)
-    b_o_FTR = rng.normal(loc = data[team_b]["offense"]["FTR"]["mean"], scale = data[team_b]["offense"]["FTR"]["std"], size = n_sim)
-
-    a_d_eFG = rng.normal(loc = data[team_a]["defense"]["eFG"]["mean"], scale = data[team_a]["defense"]["eFG"]["std"], size = n_sim)
-    a_d_TOV = rng.normal(loc = data[team_a]["defense"]["TOV"]["mean"], scale = data[team_a]["defense"]["TOV"]["std"], size = n_sim)
-    a_d_ORB = rng.normal(loc = data[team_a]["defense"]["ORB"]["mean"], scale = data[team_a]["defense"]["ORB"]["std"], size = n_sim)
-    a_d_FTR = rng.normal(loc = data[team_a]["defense"]["FTR"]["mean"], scale = data[team_a]["defense"]["FTR"]["std"], size = n_sim)
-
-    b_expected_eFG = rng.normal(loc = (b_o_eFG + a_d_eFG ) / 2, scale = sigma["eFG"], size = n_sim)
-    b_expected_TOV = rng.normal(loc = (b_o_TOV + a_d_TOV ) / 2, scale = sigma["TOV"], size = n_sim)
-    b_expected_ORB = rng.normal(loc = (b_o_ORB + a_d_ORB ) / 2, scale = sigma["ORB"], size = n_sim)
-    b_expected_FTR = rng.normal(loc = (b_o_FTR + a_d_FTR ) / 2, scale = sigma["FTR"], size = n_sim)
-    
-    #formulas
-    pace = 100 #average possesions of a nba team
-    ft_pct = 0.77 #average free throw conversion rate of an nba team
-
-    a_effective_pos = pace * (1 - a_expected_TOV) * (1 + (a_expected_ORB * (1 - a_expected_eFG)))
-    a_points = a_effective_pos * (2 * a_expected_eFG + a_expected_FTR * ft_pct)
-
-    b_effective_pos = pace * (1 - b_expected_TOV) * (1 + (b_expected_ORB * (1 - b_expected_eFG)))
-    b_points = b_effective_pos * (2 * b_expected_eFG + b_expected_FTR * ft_pct)
+    if with_pace:
+        possessions = draw_possessions(rng, a, b, params.pace_sigma(), n_sim)
+        constants = params.points_params()
+        a_points, b_points = points(a_game, possessions, constants), points(b_game, possessions, constants)
+    else:
+        possessions = LEGACY_PACE
+        a_points, b_points = legacy_points(a_game), legacy_points(b_game)
 
     a_mean_points = np.mean(a_points)
     b_mean_points = np.mean(b_points)
@@ -79,7 +143,9 @@ def simulate_factors(team_a, team_b, data: dict, seed=None, sigma=None):
         "team_a_avg_score": a_mean_points,
         "team_b_avg_score": b_mean_points,
         "team_a_win_pct": (a_win_pct / n_sim) * 100,  # Convert raw count to percentage
-        "team_b_win_pct": (b_win_pct / n_sim) * 100
+        "team_b_win_pct": (b_win_pct / n_sim) * 100,
+        "margin_sd": float(np.std(a_points - b_points)),   # spread of the simulated final margins
+        "possessions": float(np.mean(possessions)),
     }
 if __name__ == "__main__":
     # Load the team profiles into memory

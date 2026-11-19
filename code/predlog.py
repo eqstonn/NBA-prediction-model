@@ -15,7 +15,12 @@ Metrics
   spread MAE        mean |(proj_home - proj_away) - (actual_home - actual_away)|, in points
   Brier score       mean (p - y)^2, p = win_pct / 100, y = 1 if predicted_winner won else 0
                     (identical to the home-win form; 0 is perfect, 0.25 is a coin flip)
+  projected total   mean proj_home + proj_away;  actual total: mean actual_home + actual_away
+  margin error SD   SD of (actual_home - actual_away) - (proj_home - proj_away): how far real
+                    margins land from the projection. A well-calibrated simulation's own
+                    margin SD (simulation.py "margin_sd") matches it.
 """
+import statistics
 import csv
 import os
 from pathlib import Path
@@ -73,12 +78,16 @@ def append_rows(path, rows) -> int:
     return len(new)
 
 
+METRIC_KEYS = ("accuracy", "confidence", "spread_mae", "brier", "proj_total", "actual_total", "margin_sd")
+
+
 def metrics(rows) -> dict:
-    """{"games", "accuracy", "spread_mae", "brier"} over the rows (None values when there are no rows)."""
+    """{"games", *METRIC_KEYS} over the rows (None values when there are no rows)."""
     if not rows:
-        return {"games": 0, "accuracy": None, "confidence": None, "spread_mae": None, "brier": None}
+        return {"games": 0, **{k: None for k in METRIC_KEYS}}
     correct, spread_errors, brier = 0, [], []
     confidence = 0.0
+    proj_totals, actual_totals, margin_errors = [], [], []
     for r in rows:
         actual_home, actual_away = int(r["actual_home"]), int(r["actual_away"])
         actual_winner = r["home"] if actual_home > actual_away else r["away"]
@@ -88,13 +97,19 @@ def metrics(rows) -> dict:
         spread_errors.append(abs(projected - (actual_home - actual_away)))
         brier.append((float(r["win_pct"]) / 100 - hit) ** 2)
         confidence += float(r["win_pct"]) / 100
+        proj_totals.append(float(r["proj_home"]) + float(r["proj_away"]))
+        actual_totals.append(actual_home + actual_away)
+        margin_errors.append((actual_home - actual_away) - projected)
     n = len(rows)
     return {"games": n, "accuracy": correct / n, "confidence": confidence / n,
-            "spread_mae": sum(spread_errors) / n, "brier": sum(brier) / n}
+            "spread_mae": sum(spread_errors) / n, "brier": sum(brier) / n,
+            "proj_total": sum(proj_totals) / n, "actual_total": sum(actual_totals) / n,
+            "margin_sd": statistics.pstdev(margin_errors)}
 
 
 def format_metrics(m: dict) -> str:
     if not m["games"]:
         return "no games in the log yet"
     return (f"{m['games']} games: winner accuracy {m['accuracy']:.1%} (avg confidence {m['confidence']:.1%}), "
-            f"spread MAE {m['spread_mae']:.2f} pts, Brier {m['brier']:.4f}")
+            f"spread MAE {m['spread_mae']:.2f} pts, Brier {m['brier']:.4f}, "
+            f"total {m['proj_total']:.1f} projected vs {m['actual_total']:.1f} actual")

@@ -167,9 +167,9 @@ def seen_sigma(env, monkeypatch):
         seen["update"].append(sigma)
         return fake_fit(prior, observed, random_seed, engine, sigma)
 
-    def pred(home_id, away_id, priors, seed=None, sigma=None):
+    def pred(home_id, away_id, priors, seed=None, sigma=None, **kwargs):
         seen["sim"].append(sigma)
-        return real_predict(home_id, away_id, priors, seed=seed, sigma=sigma)
+        return real_predict(home_id, away_id, priors, seed=seed, sigma=sigma, **kwargs)
 
     monkeypatch.setattr(bayes_update, "_fit", fit)
     monkeypatch.setattr(update, "predict_game", pred)

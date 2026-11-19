@@ -1,7 +1,7 @@
 """
-Shared test doubles for the update pipeline (used by test_data.py and test_log.py).
+Shared test doubles for the update pipeline (used by test_data.py, test_log.py, test_sigma.py, test_sim.py).
 
-NBA.com is replaced by FakeNBA (game logs, season schedule, box scores) and the PyMC
+NBA.com is replaced by FakeNBA (game logs, season schedule, box scores, advanced box scores) and the PyMC
 fit by fake_fit, a fast deterministic stand-in whose result depends on the order games
 are applied, so a game applied twice or out of order shows up as a different
 priors.json. Env points every file the pipeline writes at a temp folder; the real
@@ -59,9 +59,11 @@ class FakeNBA:
         self.log_missing = set()
         self.sched_missing = set()
         self.sched_scores = {}
+        self.no_possessions = set()   # games whose advanced box score lacks the home team's possessions
         self.log_requests = []
         self.schedule_requests = 0
         self.box_requests = []
+        self.advanced_requests = []
 
     def schedule(self, season):
         self.schedule_requests += 1
@@ -117,6 +119,23 @@ class FakeNBA:
                          "statistics": stats(2, missing=game_id in self.broken)},
         }}
 
+    def advanced_box_score(self, game_id):
+        """Each team's possessions: 95 + (game number % 11), the away team one fewer."""
+        self.advanced_requests.append(game_id)
+        _, _, away, home, *_ = next(g for g in FAKE_SEASON if g[0] == game_id)
+        poss = 95.0 + int(game_id[-3:]) % 11
+        return {"boxScoreAdvanced": {
+            "gameId": game_id,
+            "homeTeam": {"teamId": int(ID[home]), "teamTricode": home,
+                         "statistics": {"possessions": None if game_id in self.no_possessions else poss}},
+            "awayTeam": {"teamId": int(ID[away]), "teamTricode": away, "statistics": {"possessions": poss - 1}},
+        }}
+
+    @staticmethod
+    def game_possessions(game_id):
+        """The game's possessions the fake reports (average of the two teams)."""
+        return 95.0 + int(game_id[-3:]) % 11 - 0.5
+
 
 def fake_fit(prior, observed, random_seed=None, engine=None, sigma=None):
     """Deterministic stand-in for the PyMC fit: means move 10% toward the observation."""
@@ -145,6 +164,7 @@ class Env:
         monkeypatch.setattr(boxscores, "_download_game_log", self.nba.game_log)
         monkeypatch.setattr(boxscores, "_download_schedule", self.nba.schedule)
         monkeypatch.setattr(boxscores, "_download_box_score", self.nba.box_score)
+        monkeypatch.setattr(boxscores, "_download_advanced_box_score", self.nba.advanced_box_score)
         monkeypatch.setattr(boxscores, "_sleep", self.sleeps.append)
         monkeypatch.setattr(boxscores, "PAUSE", 0)
         self.use(folder)
@@ -156,6 +176,7 @@ class Env:
         self.mp.setattr(update, "APPLIED_GAMES_PATH", folder / "applied_games.json")
         self.mp.setattr(update, "LOG_PATH", folder / "prediction_log.csv")
         self.mp.setattr(boxscores, "CACHE_DIR", folder / "boxscores")
+        self.mp.setattr(boxscores, "ADVANCED_CACHE_DIR", folder / "boxscores_advanced")
 
     def use(self, folder):
         """point_at(folder) and start the season there."""

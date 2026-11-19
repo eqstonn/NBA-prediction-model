@@ -40,10 +40,12 @@ FINE_STEP, FINE_STEPS = 0.0001, 50                     # best +- 50 steps of 0.0
 LOG_2PI = math.log(2 * math.pi)
 
 
-def prequential(games: list, team_ids, sigma: dict):
+def prequential(games: list, team_ids, sigma: dict, residuals=None):
     """
     ({factor: total log predictive density}, {factor: mean squared standardized residual}) of
     the exact training pass with `sigma`. `games` = update_game inputs, oldest first.
+    If `residuals` is a list, each row's standardized residuals {factor: (y - mean) / sqrt(var)}
+    are appended to it, in row order (fit_sim.py uses them for the factor correlation).
     """
     priors = default_priors(team_ids)
     loglik = {f: 0.0 for f in FACTORS}
@@ -52,11 +54,15 @@ def prequential(games: list, team_ids, sigma: dict):
         offense, defense = priors[g["team"]]["offense"], priors[g["opponent"]]["defense"]
         prior = {"o": {f: (offense[f]["mean"], offense[f]["std"]) for f in FACTORS},
                  "d": {f: (defense[f]["mean"], defense[f]["std"]) for f in FACTORS}}
+        z = {}
         for f in FACTORS:
             mean, var = bayes_update.predictive(prior, f, sigma)
             r2 = (g[f] - mean) ** 2
             loglik[f] -= 0.5 * (LOG_2PI + math.log(var) + r2 / var)
             z2[f] += r2 / var
+            z[f] = (g[f] - mean) / math.sqrt(var)
+        if residuals is not None:
+            residuals.append(z)
         bayes_update.update_game(priors, g, tau=dynamic_model.TRAINING_TAU, engine="exact", sigma=sigma)
     return loglik, {f: z2[f] / len(games) for f in FACTORS}
 
@@ -112,7 +118,9 @@ def main(argv=None):
     legacy_loglik, legacy_z2 = prequential(games, data["team_ids"], params.LEGACY_UPDATE_SIGMA)
     seconds = time.perf_counter() - start
 
-    result = {
+    # keep the other sections (factor_corr, points, pace from fit_sim.py); replace only these two
+    result = json.loads(out.read_text(encoding="utf-8")) if out.exists() else {}
+    result.update({
         "sigma": {f: fit["sigma"][f] for f in FACTORS},
         "sigma_fit": {
             "method": "per-factor maximum of the one-step-ahead (prequential) predictive log-likelihood "
@@ -125,7 +133,7 @@ def main(argv=None):
             "mean_squared_standardized_residual": {f: round(fit["mean_z2"][f], 4) for f in FACTORS},
             "fitted": date.today().isoformat(),
         },
-    }
+    })
     tmp = out.with_name(out.name + ".tmp")
     tmp.write_text(json.dumps(result, indent=4) + "\n", encoding="utf-8")
     tmp.replace(out)
