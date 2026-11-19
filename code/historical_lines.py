@@ -101,7 +101,11 @@ def training_games(csv_path=None, before=TRAINING_CUTOFF, years=3) -> list:
     "home_pts", "away_pts", "game_type"}, from the Kaggle TeamStatisticsExtended rows (home == 1).
     """
     csv_path = Path(csv_path or next((p for p in TRAINING_CSVS if p.exists()), TRAINING_CSVS[0]))
-    df = clean_data_frame(create_data_frame(csv_path), before=before, years=years)
+    return games_from_frame(clean_data_frame(create_data_frame(csv_path), before=before, years=years))
+
+
+def games_from_frame(df) -> list:
+    """training_games from an already cleaned Kaggle frame (data_prep.clean_data_frame; e.g. dynamic_model's "cleaned")."""
     games = {}
     for gid, when, team, opponent, home, pts, opp_pts, game_type in zip(
             df["gameId"], df["gameDateTimeEst"], df["teamId"], df["opponentTeamId"], df["home"],

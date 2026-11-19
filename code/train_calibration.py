@@ -58,10 +58,12 @@ VARIANTS = {
 BURN_IN_DAYS = 365
 
 
-def run_pass(data: dict, home: str, variants: list, rest: str = params.DEFAULT_REST_MODE) -> dict:
+def run_pass(data: dict, home: str, variants: list, rest: str = params.DEFAULT_REST_MODE,
+             with_ids: bool = False) -> dict:
     """
     {variant: [(p_home, actual home margin, projected margin, projected total, actual total, sim margin SD)]}
     for every scored game, simulated with `home` and `rest` from the one-step-ahead curves of the training pass.
+    with_ids=True appends the game's 10-digit NBA.com gameId to each record (report.py matches Vegas lines by it).
     """
     cleaned = data["cleaned"]
     with_home, with_rest = params.is_on(home, "home"), params.is_on(rest, "rest")
@@ -106,8 +108,9 @@ def run_pass(data: dict, home: str, variants: list, rest: str = params.DEFAULT_R
             for v, kw in settings.items():
                 r = simulation.simulate_factors(home_id, away_id, priors, seed=k, home=home, neutral=neutral,
                                                 rest=rest, **days, **kw)
-                out[v].append((r["team_a_win_pct"] / 100, margin, r["team_a_avg_score"] - r["team_b_avg_score"],
-                               r["team_a_avg_score"] + r["team_b_avg_score"], total, r["margin_sd"]))
+                record = (r["team_a_win_pct"] / 100, margin, r["team_a_avg_score"] - r["team_b_avg_score"],
+                          r["team_a_avg_score"] + r["team_b_avg_score"], total, r["margin_sd"])
+                out[v].append(record + (str(int(gid)).zfill(10),) if with_ids else record)
         for g, offset, *_ in rows:
             bayes_update.update_game(priors, g, tau=dynamic_model.TRAINING_TAU, engine="exact", sigma=update_sigma,
                                      offset=offset)
