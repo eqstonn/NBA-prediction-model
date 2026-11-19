@@ -1,7 +1,8 @@
 import json
 from data_prep import create_data_frame, clean_data_frame, get_team_ids
 
-def initialize_priors(team_ids):
+def default_priors(team_ids):
+    """The flat starting curves (same for every team) that training starts from."""
 
     starting_metrics = {
         "eFG": {"mean": 0.540, "std": 0.05},
@@ -27,7 +28,12 @@ def initialize_priors(team_ids):
                 "FTR": dict(starting_metrics["FTR"])
             }
         }
+    return priors
 
+
+def initialize_priors(team_ids):
+    """DESTRUCTIVE: overwrite priors.json (in the current folder) with the flat defaults."""
+    priors = default_priors(team_ids)
     with open("priors.json", 'w', encoding="utf-8") as file:
         json.dump(priors, file, indent = 4)
 

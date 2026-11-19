@@ -136,10 +136,10 @@ def test_crash_after_logging_keeps_one_row_per_game(env, tmp_path, monkeypatch):
 
     spy = update.apply_game
 
-    def crash_on_third(priors, game, m=update.DEFAULT_M, random_seed=None):
+    def crash_on_third(priors, game, m=update.DEFAULT_M, random_seed=None, **kwargs):
         if game["game_id"] == EXPECTED[2]:
             raise RuntimeError("simulated crash after the prediction was logged")
-        return spy(priors, game, m, random_seed)
+        return spy(priors, game, m, random_seed, **kwargs)
 
     monkeypatch.setattr(update, "apply_game", crash_on_third)
     with pytest.raises(RuntimeError):

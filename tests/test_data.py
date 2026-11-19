@@ -96,11 +96,11 @@ def test_interrupted_run_resumes_at_next_game(env, tmp_path, monkeypatch, k):
     calls = {"n": 0}
     spy = update.apply_game
 
-    def crash_after_k(priors, game, m=update.DEFAULT_M, random_seed=None):
+    def crash_after_k(priors, game, m=update.DEFAULT_M, random_seed=None, **kwargs):
         if calls["n"] == k:
             raise RuntimeError(f"simulated crash after game {k}")
         calls["n"] += 1
-        return spy(priors, game, m, random_seed)
+        return spy(priors, game, m, random_seed, **kwargs)
 
     monkeypatch.setattr(update, "apply_game", crash_after_k)
     with pytest.raises(RuntimeError):

@@ -7,19 +7,29 @@ def create_data_frame(file_path: str):
     df = pd.read_csv(file_path)
     return df
 
-def clean_data_frame(df):
+def clean_data_frame(df, before=None, years=3):
     """
-    cleans raw team data by removing inclomplete or irrelevant records and filtering for 3 years to today.
+    cleans raw team data by removing inclomplete or irrelevant records and filtering by date.
+
+    before=None: the original behaviour, the last 3 years up to today.
+    before="2026-10-20": only games before that date, from `years` years before it
+                         (years=None: every game before it).
     """
 
     #remove incomplete or irrelevant records with no game id or game type (eg all star games and pre season)
     #ignore pre season since bad for predictive since coaches experiment and bench starters
     df = df.dropna(subset = ['gameId', 'gameType'])
 
-    #filter for 3 years from today
-    threshold = pd.Timestamp.now() - pd.DateOffset(years = 3)
     df['gameDateTimeEst'] = pd.to_datetime( df['gameDateTimeEst']) #convert from str to datetime object
-    df = df[df['gameDateTimeEst'] >= threshold]
+    if before is None:
+        #filter for 3 years from today
+        threshold = pd.Timestamp.now() - pd.DateOffset(years = 3)
+        df = df[df['gameDateTimeEst'] >= threshold]
+    else:
+        end = pd.Timestamp(before)
+        df = df[df['gameDateTimeEst'] < end]
+        if years is not None:
+            df = df[df['gameDateTimeEst'] >= end - pd.DateOffset(years = years)]
     df = df.sort_values(by='gameDateTimeEst', ascending = True)
 
     return df

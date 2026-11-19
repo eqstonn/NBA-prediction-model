@@ -53,8 +53,11 @@ Prediction log and replay
 Before a game is applied it is predicted from the current priors (predict.predict_game,
 fixed simulation seed) and appended to prediction_log.csv (see predlog.py); a game
 already in the log is never added twice. Each run ends with the log's winner accuracy,
-spread MAE and Brier score. PyMC fits use a fixed seed per game (fit_seed), so a run is
-reproducible.
+spread MAE and Brier score.
+
+Engines: --engine exact (default) computes each update with the closed-form formula in
+bayes_update.py; --engine pymc samples it with PyMC (fixed seed per game, fit_seed).
+applied_games.json records which engine applied each game.
 
 --replay rebuilds the season into another file: season reset from --from, then every
 game in applied_games.json oldest first, each predicted + logged into --log before it is
@@ -73,7 +76,7 @@ from datetime import date
 from pathlib import Path
 
 # bayes_update sets PYTENSOR_FLAGS before it imports pymc
-from bayes_update import FACTORS, update_game
+from bayes_update import DEFAULT_ENGINE, ENGINES, FACTORS, update_game
 import boxscores
 import predlog
 from predict import predict_game
@@ -155,7 +158,7 @@ def season_tau(m: int) -> float:
     return STD_SCALE / m
 
 
-def apply_game(priors: dict, game: dict, m: int = DEFAULT_M, random_seed=None) -> dict:
+def apply_game(priors: dict, game: dict, m: int = DEFAULT_M, random_seed=None, engine: str = DEFAULT_ENGINE) -> dict:
     """
     Update `priors` in place from one finished game (boxscores.py shape): home offense vs
     away defense, then away offense vs home defense, each widened by tau = 0.1/M first.
@@ -164,7 +167,7 @@ def apply_game(priors: dict, game: dict, m: int = DEFAULT_M, random_seed=None) -
     for i, (side, other) in enumerate((("home", "away"), ("away", "home"))):
         row = {"team": game[side]["id"], "opponent": game[other]["id"],
                **{f: game[side][f] for f in FACTORS}}
-        update_game(priors, row, tau=tau, random_seed=None if random_seed is None else random_seed + i)
+        update_game(priors, row, tau=tau, random_seed=None if random_seed is None else random_seed + i, engine=engine)
     return priors
 
 
@@ -202,13 +205,14 @@ def load_applied() -> dict:
     return applied
 
 
-def record_game(priors: dict, applied: dict, game: dict) -> None:
+def record_game(priors: dict, applied: dict, game: dict, engine: str = DEFAULT_ENGINE) -> None:
     """Save priors.json and record the game in applied_games.json, crash-safely (see module docstring)."""
     home, away = game["home"], game["away"]
     entry = {"date": game["date"],
              "matchup": f"{away['abbr']} @ {home['abbr']}",
              "score": f"{away['pts']}-{home['pts']}",
              "nba_cup": "IST" in game.get("season_types", []),
+             "engine": engine,
              "pending": priors_fingerprint(priors)}
     applied[game["game_id"]] = entry
     write_json(APPLIED_GAMES_PATH, applied)   # 1. pending, with the fingerprint of the new priors
@@ -236,7 +240,7 @@ def print_log_metrics(log_path) -> dict:
     return m
 
 
-def run_update(through=None, limit=None, m: int = DEFAULT_M, log_path=None) -> dict:
+def run_update(through=None, limit=None, m: int = DEFAULT_M, log_path=None, engine: str = DEFAULT_ENGINE) -> dict:
     """
     Apply every finished, not-yet-applied game (oldest first) to priors.json; saves after
     each game. Each game is first predicted from the current priors and logged to
@@ -258,7 +262,7 @@ def run_update(through=None, limit=None, m: int = DEFAULT_M, log_path=None) -> d
     print(f"{len(schedule)} games from {boxscores.OPENING_NIGHT} through {through or 'today'}: "
           f"{already} already applied, {len(todo)} to go"
           + (f" (stopping after {limit})" if limit is not None and limit < len(todo) else "")
-          + f". M={m}, tau={season_tau(m):.5f}\n")
+          + f". M={m}, tau={season_tau(m):.5f}, engine={engine}\n")
 
     done, skipped = [], []
     start = time.perf_counter()
@@ -276,8 +280,8 @@ def run_update(through=None, limit=None, m: int = DEFAULT_M, log_path=None) -> d
         t = time.perf_counter()
         game = boxscores.with_factors(game, factors)
         log_prediction(priors, game, log_path)   # before applying: the prediction uses pre-game priors
-        new_priors = apply_game(copy.deepcopy(priors), game, m, random_seed=fit_seed(game["game_id"]))
-        record_game(new_priors, applied, game)
+        new_priors = apply_game(copy.deepcopy(priors), game, m, random_seed=fit_seed(game["game_id"]), engine=engine)
+        record_game(new_priors, applied, game, engine)
         priors = new_priors
         done.append(game["game_id"])
         print(f"  [{len(done):>4}] {label}  {time.perf_counter() - t:.1f} s")
@@ -308,7 +312,7 @@ def _replay_game(game_id: str, entry: dict, factors: dict) -> dict:
             "winner": home["id"] if home_pts > away_pts else away["id"]}
 
 
-def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M) -> dict:
+def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M, engine: str = DEFAULT_ENGINE) -> dict:
     """
     Season reset from `from_path` (std 0.1/sqrt(n)), then every game in applied_games.json,
     oldest first (date, gameId), each predicted + logged before it is applied. Writes ONLY
@@ -333,7 +337,7 @@ def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M
     if log_path.exists():
         log_path.unlink()   # a replay rebuilds its log from scratch
     print(f"Replaying {len(order)} games from {applied[order[0]]['date']} to {applied[order[-1]]['date']}, "
-          f"oldest first, from {from_path.name} (N={n}, M={m}) -> {out_path.name}, {log_path.name}\n")
+          f"oldest first, from {from_path.name} (N={n}, M={m}, engine={engine}) -> {out_path.name}, {log_path.name}\n")
 
     start = time.perf_counter()
     for i, game_id in enumerate(order, 1):
@@ -343,7 +347,7 @@ def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M
         game = _replay_game(game_id, applied[game_id], factors)
         t = time.perf_counter()
         log_prediction(priors, game, log_path)
-        apply_game(priors, game, m, random_seed=fit_seed(game_id))
+        apply_game(priors, game, m, random_seed=fit_seed(game_id), engine=engine)
         print(f"  [{i:>4}/{len(order)}] {game['date']}  {applied[game_id]['matchup']}  ({game_id})  "
               f"{time.perf_counter() - t:.1f} s")
 
@@ -352,7 +356,7 @@ def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M
     return {"games": order, "metrics": print_log_metrics(log_path)}
 
 
-def trial(n: int = 5, m: int = DEFAULT_M) -> None:
+def trial(n: int = 5, m: int = DEFAULT_M, engine: str = DEFAULT_ENGINE) -> None:
     """Dry run: apply the season's first n games to an in-memory copy of priors.json. Writes nothing."""
     from boxscores import SEASON, fetch_games
 
@@ -364,14 +368,14 @@ def trial(n: int = 5, m: int = DEFAULT_M) -> None:
 
     priors = load_json(PRIORS_PATH)
     print(f"Applying them to an in-memory copy of {PRIORS_PATH.name} "
-          f"(M={m}, tau={season_tau(m):.5f}). Nothing is written.\n")
+          f"(M={m}, tau={season_tau(m):.5f}, engine={engine}). Nothing is written.\n")
 
     seconds, max_shift = [], 0.0
     for game in games:
         home, away = game["home"], game["away"]
         before = copy.deepcopy({t["id"]: priors[t["id"]] for t in (home, away)})
         start = time.perf_counter()
-        apply_game(priors, game, m)
+        apply_game(priors, game, m, engine=engine)
         seconds.append(time.perf_counter() - start)
 
         winner = home if game["winner"] == home["id"] else away
@@ -415,6 +419,9 @@ def main(argv=None):
                              "changes and timing, write nothing")
     parser.add_argument("--m", type=int, default=DEFAULT_M,
                         help=f"per-game drift tau = 0.1/M added before each fit (default {DEFAULT_M})")
+    parser.add_argument("--engine", choices=ENGINES, default=DEFAULT_ENGINE,
+                        help=f"how each game's update is computed: exact (closed form) or pymc (MCMC); "
+                             f"default {DEFAULT_ENGINE}")
     parser.add_argument("--log", metavar="CSV",
                         help=f"prediction log (--update default: {LOG_PATH.name}; required with --replay)")
     parser.add_argument("--replay", action="store_true",
@@ -455,7 +462,7 @@ def main(argv=None):
 
     if args.replay:
         try:
-            replay(args.from_path, args.out, args.log, n=args.n, m=args.m)
+            replay(args.from_path, args.out, args.log, n=args.n, m=args.m, engine=args.engine)
         except ValueError as err:
             parser.error(str(err))
         return
@@ -465,9 +472,9 @@ def main(argv=None):
         print(f"Reset {len(NBA_TEAMS)} NBA teams to std = {season_std(args.n):.5f} (N={args.n}) "
               f"from {FROZEN_PRIORS_PATH.name} -> {PRIORS_PATH.name}; cleared {APPLIED_GAMES_PATH.name}")
     if args.update:
-        run_update(through=args.through, limit=args.limit, m=args.m, log_path=args.log)
+        run_update(through=args.through, limit=args.limit, m=args.m, log_path=args.log, engine=args.engine)
     if args.trial is not None:
-        trial(args.trial, args.m)
+        trial(args.trial, args.m, engine=args.engine)
 
 
 if __name__ == "__main__":

@@ -118,7 +118,7 @@ class FakeNBA:
         }}
 
 
-def fake_fit(prior, observed, random_seed=None):
+def fake_fit(prior, observed, random_seed=None, engine=None):
     """Deterministic stand-in for the PyMC fit: means move 10% toward the observation."""
     return {side: {f: (prior[side][f][0] + 0.1 * (observed[f] - prior[side][f][0]), prior[side][f][1] * 0.99)
                    for f in FACTORS}
@@ -135,8 +135,8 @@ class Env:
         self.sleeps = []
         real_apply = update.apply_game
 
-        def spy_apply(priors, game, m=update.DEFAULT_M, random_seed=None):
-            result = real_apply(priors, game, m, random_seed)
+        def spy_apply(priors, game, m=update.DEFAULT_M, random_seed=None, **kwargs):
+            result = real_apply(priors, game, m, random_seed, **kwargs)
             self.applied_order.append(game["game_id"])
             return result
 
