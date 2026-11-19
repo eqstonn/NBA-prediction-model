@@ -8,6 +8,7 @@ Build the predictions website for this week's NBA games.
     needs priors with team paces (priors.json has them).
     python code/build_site.py --sigma-sim legacy --pace off --home off   # the previous live simulation
     python code/build_site.py --sim-corr on                              # Phase 7 correlated factors
+    python code/build_site.py --rest on --priors <priors trained with --rest on>   # Phase 9 rest (default off)
 
 Writes site/index.html (open it in a browser) and site/predictions.json.
 """
@@ -18,7 +19,9 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import boxscores
 import params
+import rest as rest_days
 from predict import REPO_ROOT, load_model, predict_game
 from schedule import fetch_games
 
@@ -27,17 +30,26 @@ EASTERN = ZoneInfo("America/New_York")
 
 
 def build_predictions(games, model, sim_sigma=None, sim_corr: str = params.DEFAULT_SIM_CORR_MODE,
-                      pace: str = params.DEFAULT_PACE_MODE, home: str = params.DEFAULT_HOME_MODE):
+                      pace: str = params.DEFAULT_PACE_MODE, home: str = params.DEFAULT_HOME_MODE,
+                      rest: str = params.DEFAULT_REST_MODE, rest_lookup=None):
     """
     sim_sigma: {factor: game noise} for the simulation; None = params.sim_sigma() (fitted by default).
-    sim_corr / pace / home: "on" or "off" (defaults in params.py, see simulation.py); a game with
-    "neutral": True gets no home boost.
+    sim_corr / pace / home / rest: "on" or "off" (defaults in params.py, see simulation.py); a game
+    with "neutral": True gets no home boost. rest="on" needs rest_lookup(team_id, date) -> rest
+    info (rest.rest_lookup of the season's NBA.com schedule); each row then carries "rest".
     """
+    with_rest = params.is_on(rest, "rest")
+    if with_rest and rest_lookup is None:
+        raise ValueError("rest is on but there is no rest_lookup (the season's schedule)")
     rows = []
     for g in games:
+        days = {side: rest_lookup(g[side]["id"], g["date"])["rest"] for side in ("home", "away")} if with_rest else {}
         pred = predict_game(g["home"]["id"], g["away"]["id"], model, sigma=sim_sigma, sim_corr=sim_corr, pace=pace,
-                            home=home, neutral=g.get("neutral", False))
+                            home=home, neutral=g.get("neutral", False), rest=rest, rest_home=days.get("home"),
+                            rest_away=days.get("away"))
         row = dict(g, prediction=pred)
+        if with_rest:
+            row["rest"] = days
         if pred:
             home_fav = pred["home_win_pct"] >= pred["away_win_pct"]
             row["pick"] = g["home"]["abbr"] if home_fav else g["away"]["abbr"]
@@ -193,6 +205,9 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--home", choices=params.SWITCH_MODES, default=params.DEFAULT_HOME_MODE,
                         help="add the fitted home-court boost (none at neutral sites); use priors trained with "
                              f"--home on (default {params.DEFAULT_HOME_MODE})")
+    parser.add_argument("--rest", choices=params.SWITCH_MODES, default=params.DEFAULT_REST_MODE,
+                        help="add the fitted rest effect (back-to-backs, from NBA.com's season schedule); use priors "
+                             f"trained with --rest on (default {params.DEFAULT_REST_MODE})")
     return parser
 
 
@@ -204,14 +219,15 @@ def main(argv=None):
 
     model, priors_path = load_model(args.priors)
     games, source = fetch_games(start, args.days)
+    lookup = rest_days.rest_lookup(boxscores.get_schedule(boxscores.SEASON)) if args.rest == "on" else None
     rows = build_predictions(games, model, sim_sigma=params.sim_sigma(args.sigma_sim), sim_corr=args.sim_corr,
-                             pace=args.pace, home=args.home)
+                             pace=args.pace, home=args.home, rest=args.rest, rest_lookup=lookup)
 
     SITE_DIR.mkdir(exist_ok=True)
     (SITE_DIR / "predictions.json").write_text(json.dumps(
         {"start": start.isoformat(), "end": end.isoformat(), "source": source,
          "model": Path(priors_path).name, "sigma_sim": args.sigma_sim, "sim_corr": args.sim_corr, "pace": args.pace,
-         "home": args.home, "games": rows}, indent=2), encoding="utf-8")
+         "home": args.home, "rest": args.rest, "games": rows}, indent=2), encoding="utf-8")
     (SITE_DIR / "index.html").write_text(render_page(rows, source, priors_path, start, end), encoding="utf-8")
     print(f"Wrote {len(rows)} games ({source}) to {SITE_DIR / 'index.html'}")
 

@@ -20,6 +20,10 @@ Both off (with legacy sigma and home off) = the original simulation, draw for dr
 home "on" (Phase 8, default): team_a is the home team; the home boost (model_params.json["home"]) is
 added to each side's matchup expectation in step 1, except at neutral sites. "off" adds
 nothing, so the draws are the same numbers as before.
+
+rest "on" (Phase 9, default "off"): each side's matchup expectation also gets the rest effect
+(model_params.json["rest"]) from both teams' rest, rest_a / rest_b ("b2b", "1", "2+"; see
+rest.py), added to the home boost. "off" adds nothing.
 """
 import json
 
@@ -111,13 +115,15 @@ def points(g: dict, possessions, constants=None):
 
 def simulate_factors(team_a, team_b, data: dict, seed=None, sigma=None,
                      sim_corr: str = params.DEFAULT_SIM_CORR_MODE, pace: str = params.DEFAULT_PACE_MODE,
-                     home: str = params.DEFAULT_HOME_MODE, neutral: bool = False):
+                     home: str = params.DEFAULT_HOME_MODE, neutral: bool = False,
+                     rest: str = params.DEFAULT_REST_MODE, rest_a=None, rest_b=None):
     """
     Simulate team_a vs team_b from the curves in `data` (priors). seed=None: fresh randomness
     (website); an int: reproducible (prediction log). sigma: {factor: game noise}, default
     params.sim_sigma() (fitted). sim_corr / pace: "on" or "off" (see the module docstring).
     home "on": team_a is the home team; its offensive line gets the home boost's "offense"
     shifts and team_b's line the "defense" shifts (params.home_offsets), unless neutral=True.
+    rest "on": both lines also get the rest effect from rest_a / rest_b (params.rest_offsets).
     """
     n_sim = N_SIM
     rng = np.random.default_rng(seed)
@@ -125,6 +131,12 @@ def simulate_factors(team_a, team_b, data: dict, seed=None, sigma=None,
     corr = params.sim_corr(sim_corr)
     with_pace = params.is_on(pace, "pace")
     offset_a, offset_b = params.home_offsets(home, neutral)
+    if params.is_on(rest, "rest"):
+        if rest_a is None or rest_b is None:
+            raise ValueError("rest is on but the teams' rest (rest_a, rest_b) is missing")
+        rest_shift_a, rest_shift_b = params.rest_offsets(rest, rest_a, rest_b)
+        offset_a = params.combine_offsets(offset_a, rest_shift_a)
+        offset_b = params.combine_offsets(offset_b, rest_shift_b)
     a, b = data[team_a], data[team_b]
     if with_pace:
         for team, curves in ((team_a, a), (team_b, b)):

@@ -30,6 +30,10 @@ The factor training is unchanged, so the offense/defense curves are identical to
 value: the home team's offensive line gets "offense", the away team's "defense". Games at a
 neutral site (NBA.com's schedule, see boxscores.neutral_flags; the schedules of the training
 seasons are downloaded once into stats/schedules/) and games with a non-NBA team get none.
+
+--rest on (Phase 9, default off) adds the rest effect (model_params.json["rest"], see
+rest.py and fit_rest.py) to each row's expected value, from both teams' rest before the
+game (NBA.com's schedules); it adds to the home boost. Games with a non-NBA team get none.
 """
 import argparse
 import json
@@ -43,6 +47,7 @@ from bayes_update import DEFAULT_ENGINE, ENGINES, update_game, update_pace
 import boxscores
 from data_prep import create_data_frame, clean_data_frame, get_four_factors
 import params
+import rest as rest_days
 from schedule import NBA_TEAMS
 from state_manager import default_priors
 
@@ -158,6 +163,25 @@ def row_offsets(sides: list, boost=None) -> list:
     return [home_line if s == "home" else away_line if s == "away" else None for s in sides]
 
 
+def row_rest(data: dict) -> list:
+    """
+    Per training row (same order as data["rows"]): (rest info of the row's team, rest info of
+    its opponent) from rest.rest_games (NBA.com schedules), or None when a team isn't an NBA
+    team (All-Star games).
+    """
+    cleaned = data["cleaned"]
+    keys = [(boxscores.game_key(g), team_key(t), team_key(o))
+            for g, t, o in zip(cleaned["gameId"], cleaned["teamId"], cleaned["opponentTeamId"])]
+    nba = [t in NBA_TEAMS and o in NBA_TEAMS for _, t, o in keys]
+    table = rest_days.rest_games(sorted({k[0] for k, is_nba in zip(keys, nba) if is_nba}))
+    return [(table[gid][t], table[gid][o]) if is_nba else None for (gid, t, o), is_nba in zip(keys, nba)]
+
+
+def row_rest_offsets(rest_rows: list, effects=None) -> list:
+    """The rest shift per row (params.rest_offset with the row's team as offense), None for non-NBA rows."""
+    return [None if r is None else params.rest_offset("on", r[0]["rest"], r[1]["rest"], effects) for r in rest_rows]
+
+
 def start_pace(priors: dict, team_ids, start_mean: float, start_std: float) -> dict:
     """Give every team the flat starting pace curve; returns `priors`."""
     for team in team_ids:
@@ -182,11 +206,12 @@ def check_output(path, overwrite=False):
 
 def run_training(csv_path, out_path, before, years=3, engine: str = DEFAULT_ENGINE,
                  sigma_update: str = params.DEFAULT_UPDATE_SIGMA_MODE, overwrite: bool = False,
-                 pace: str = params.DEFAULT_PACE_MODE, home: str = params.DEFAULT_HOME_MODE) -> dict:
+                 pace: str = params.DEFAULT_PACE_MODE, home: str = params.DEFAULT_HOME_MODE,
+                 rest: str = params.DEFAULT_REST_MODE) -> dict:
     """
     Train from flat defaults on the games before `before` (and within `years` of it) into
     `out_path`. pace="on" also trains every team's pace curve; home="on" adds the home
-    boost to each row's expected value (see the module docstring).
+    boost to each row's expected value, rest="on" the rest effect (see the module docstring).
     """
     out_path = Path(out_path)
     check_output(out_path, overwrite)
@@ -195,6 +220,8 @@ def run_training(csv_path, out_path, before, years=3, engine: str = DEFAULT_ENGI
     pace_params = params.pace_params() if with_pace else None
     with_home = params.is_on(home, "home")
     boost = params.home_boost() if with_home else None
+    with_rest = params.is_on(rest, "rest")
+    effects = params.rest_effects() if with_rest else None
 
     start = time.perf_counter()
     data = load_training_rows(csv_path, before, years)
@@ -210,6 +237,10 @@ def run_training(csv_path, out_path, before, years=3, engine: str = DEFAULT_ENGI
         raise KeyError(f"--pace on needs a 'possessions' column in {Path(csv_path).name}")
     sides = row_sides(data) if with_home else None
     offsets = row_offsets(sides, boost) if with_home else None
+    rest_rows = row_rest(data) if with_rest else None
+    if with_rest:
+        rest_shifts = row_rest_offsets(rest_rows, effects)
+        offsets = [params.combine_offsets(h, r) for h, r in zip(offsets or [None] * len(rest_shifts), rest_shifts)]
     train(four_factors, priors, engine, checkpoint if engine == "pymc" else None, sigma=sigma, offsets=offsets)
     if with_pace:
         start_pace(priors, team_ids, pace_params["start_mean"], pace_params["start_std"])
@@ -232,6 +263,10 @@ def run_training(csv_path, out_path, before, years=3, engine: str = DEFAULT_ENGI
         summary["neutral_or_non_nba_rows"] = sum(s is None for s in sides)
         print(f"  + home boost on {summary['home_rows']} rows; none on {summary['neutral_or_non_nba_rows']} rows "
               f"(neutral sites, All-Star games)")
+    if with_rest:
+        summary["b2b_rows"] = sum(r is not None and "b2b" in (r[0]["rest"], r[1]["rest"]) for r in rest_rows)
+        print(f"  + rest effect on {summary['b2b_rows']} rows with a team on a back-to-back "
+              f"(effects for {', '.join(sorted(effects['offense']))}; 2+ days is the baseline)")
     return summary
 
 
@@ -252,6 +287,9 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--home", choices=params.SWITCH_MODES, default=params.DEFAULT_HOME_MODE,
                         help="add the fitted home-court boost to each row's expected value (none at neutral "
                              f"sites); default {params.DEFAULT_HOME_MODE}")
+    parser.add_argument("--rest", choices=params.SWITCH_MODES, default=params.DEFAULT_REST_MODE,
+                        help="add the fitted rest effect (back-to-backs, rest.py) to each row's expected value; "
+                             f"default {params.DEFAULT_REST_MODE}")
     parser.add_argument("--overwrite", action="store_true", help="allow replacing an existing --out file")
     parser.add_argument("--csv", default=str(DEFAULT_CSV), help="Kaggle TeamStatisticsExtended.csv")
     return parser
@@ -271,7 +309,8 @@ def main(argv=None):
         parser.error(f"{args.csv} not found (download the Kaggle CSV into stats/)")
     try:
         run_training(args.csv, args.out, before, years=None if args.all_history else args.years, engine=args.engine,
-                     sigma_update=args.sigma_update, overwrite=args.overwrite, pace=args.pace, home=args.home)
+                     sigma_update=args.sigma_update, overwrite=args.overwrite, pace=args.pace, home=args.home,
+                     rest=args.rest)
     except (PermissionError, FileExistsError, KeyError) as err:
         parser.error(str(err))
 

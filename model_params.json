@@ -267,5 +267,581 @@
             "pace": "no pace boost: a shift of every home game's possessions is the same thing as a different league pace level (only neutral-site games could tell them apart), see fit_home.py",
             "fitted": "2026-11-18"
         }
+    },
+    "rest": {
+        "offense": {
+            "b2b": {
+                "eFG": -0.0063,
+                "TOV": 0.00131,
+                "ORB": -0.00366,
+                "FTR": -0.0008
+            }
+        },
+        "defense": {
+            "b2b": {
+                "eFG": 0.0063,
+                "TOV": -0.00131,
+                "ORB": 0.00366,
+                "FTR": 0.0008
+            }
+        },
+        "fit": {
+            "method": "one-step-ahead (prequential) log-likelihood of the exact training pass (flat start, tau=0, fitted sigma, saved home boost) with the rest shift in the forecast and the update; solved exactly by weighted least squares (the forecast residuals are linear in the shifts), SE from the exact curvature; factors fitted separately; form chosen by AIC among the forms the update can use",
+            "data": {
+                "csv": "TeamStatisticsExtended.csv",
+                "before": "2026-10-03",
+                "years": 3,
+                "rows": 7926,
+                "games": 3963,
+                "first": "2023-10-24",
+                "last": "2026-06-13",
+                "rest_source": "NBA.com ScheduleLeagueV2 (stats/schedules/), see rest.py"
+            },
+            "form": "difference, b2b",
+            "counts": {
+                "team_games": {
+                    "2+": 1704,
+                    "1": 4899,
+                    "b2bT": 876,
+                    "b2bS": 433
+                },
+                "games_with_a_b2b_team": 1112,
+                "games_both_b2b": 197,
+                "team_openers": 90
+            },
+            "estimate": {
+                "eFG": {
+                    "b2b": {
+                        "value": -0.0063,
+                        "se": 0.00149
+                    }
+                },
+                "TOV": {
+                    "b2b": {
+                        "value": 0.00131,
+                        "se": 0.00085
+                    }
+                },
+                "ORB": {
+                    "b2b": {
+                        "value": -0.00366,
+                        "se": 0.00168
+                    }
+                },
+                "FTR": {
+                    "b2b": {
+                        "value": -0.0008,
+                        "se": 0.002
+                    }
+                }
+            },
+            "forms": {
+                "both, b2b + 1 day + travel": {
+                    "parameters": 24,
+                    "log_likelihood_gain": 23.45,
+                    "aic_gain": -1.11,
+                    "held_out_gain": 0.1,
+                    "usable": false,
+                    "estimate": {
+                        "eFG": {
+                            "off_b2bT": [
+                                -0.00394,
+                                0.00272
+                            ],
+                            "off_b2bS": [
+                                -0.00476,
+                                0.0035
+                            ],
+                            "off_1": [
+                                0.00197,
+                                0.0019
+                            ],
+                            "def_b2bT": [
+                                0.00791,
+                                0.00272
+                            ],
+                            "def_b2bS": [
+                                0.01368,
+                                0.0035
+                            ],
+                            "def_1": [
+                                0.0037,
+                                0.0019
+                            ]
+                        },
+                        "TOV": {
+                            "off_b2bT": [
+                                0.00039,
+                                0.00156
+                            ],
+                            "off_b2bS": [
+                                0.00194,
+                                0.002
+                            ],
+                            "off_1": [
+                                -0.00025,
+                                0.00109
+                            ],
+                            "def_b2bT": [
+                                -0.00149,
+                                0.00156
+                            ],
+                            "def_b2bS": [
+                                -0.00264,
+                                0.002
+                            ],
+                            "def_1": [
+                                -0.0004,
+                                0.00109
+                            ]
+                        },
+                        "ORB": {
+                            "off_b2bT": [
+                                -0.00027,
+                                0.00306
+                            ],
+                            "off_b2bS": [
+                                -0.00593,
+                                0.00395
+                            ],
+                            "off_1": [
+                                0.00065,
+                                0.00214
+                            ],
+                            "def_b2bT": [
+                                0.00772,
+                                0.00306
+                            ],
+                            "def_b2bS": [
+                                4e-05,
+                                0.00395
+                            ],
+                            "def_1": [
+                                0.00069,
+                                0.00214
+                            ]
+                        },
+                        "FTR": {
+                            "off_b2bT": [
+                                -0.0032,
+                                0.00363
+                            ],
+                            "off_b2bS": [
+                                -0.00711,
+                                0.00468
+                            ],
+                            "off_1": [
+                                -0.00354,
+                                0.00253
+                            ],
+                            "def_b2bT": [
+                                -0.00058,
+                                0.00363
+                            ],
+                            "def_b2bS": [
+                                0.00637,
+                                0.00468
+                            ],
+                            "def_1": [
+                                0.00227,
+                                0.00253
+                            ]
+                        }
+                    }
+                },
+                "both, b2b + 1 day": {
+                    "parameters": 16,
+                    "log_likelihood_gain": 18.08,
+                    "aic_gain": 4.16,
+                    "held_out_gain": 1.62,
+                    "usable": true,
+                    "estimate": {
+                        "eFG": {
+                            "off_b2b": [
+                                -0.00412,
+                                0.00242
+                            ],
+                            "off_1": [
+                                0.00198,
+                                0.0019
+                            ],
+                            "def_b2b": [
+                                0.00978,
+                                0.00242
+                            ],
+                            "def_1": [
+                                0.00369,
+                                0.0019
+                            ]
+                        },
+                        "TOV": {
+                            "off_b2b": [
+                                0.00088,
+                                0.00139
+                            ],
+                            "off_1": [
+                                -0.00025,
+                                0.00109
+                            ],
+                            "def_b2b": [
+                                -0.00184,
+                                0.00139
+                            ],
+                            "def_1": [
+                                -0.0004,
+                                0.00109
+                            ]
+                        },
+                        "ORB": {
+                            "off_b2b": [
+                                -0.00224,
+                                0.00273
+                            ],
+                            "off_1": [
+                                0.00065,
+                                0.00214
+                            ],
+                            "def_b2b": [
+                                0.00512,
+                                0.00273
+                            ],
+                            "def_1": [
+                                0.00069,
+                                0.00214
+                            ]
+                        },
+                        "FTR": {
+                            "off_b2b": [
+                                -0.00438,
+                                0.00323
+                            ],
+                            "off_1": [
+                                -0.00353,
+                                0.00253
+                            ],
+                            "def_b2b": [
+                                0.00164,
+                                0.00323
+                            ],
+                            "def_1": [
+                                0.00226,
+                                0.00253
+                            ]
+                        }
+                    }
+                },
+                "both, b2b": {
+                    "parameters": 8,
+                    "log_likelihood_gain": 13.15,
+                    "aic_gain": 10.31,
+                    "held_out_gain": 1.01,
+                    "usable": true,
+                    "estimate": {
+                        "eFG": {
+                            "off_b2b": [
+                                -0.00549,
+                                0.00196
+                            ],
+                            "def_b2b": [
+                                0.0071,
+                                0.00196
+                            ]
+                        },
+                        "TOV": {
+                            "off_b2b": [
+                                0.00106,
+                                0.00112
+                            ],
+                            "def_b2b": [
+                                -0.00155,
+                                0.00112
+                            ]
+                        },
+                        "ORB": {
+                            "off_b2b": [
+                                -0.0027,
+                                0.00221
+                            ],
+                            "def_b2b": [
+                                0.00463,
+                                0.00221
+                            ]
+                        },
+                        "FTR": {
+                            "off_b2b": [
+                                -0.00172,
+                                0.00262
+                            ],
+                            "def_b2b": [
+                                -0.00013,
+                                0.00262
+                            ]
+                        }
+                    }
+                },
+                "difference, b2b + 1 day + travel": {
+                    "parameters": 12,
+                    "log_likelihood_gain": 16.11,
+                    "aic_gain": 8.22,
+                    "held_out_gain": 2.28,
+                    "usable": false,
+                    "estimate": {
+                        "eFG": {
+                            "b2b traveled": [
+                                -0.00592,
+                                0.00208
+                            ],
+                            "b2b same arena": [
+                                -0.00922,
+                                0.00262
+                            ],
+                            "1 day": [
+                                -0.00086,
+                                0.00156
+                            ]
+                        },
+                        "TOV": {
+                            "b2b traveled": [
+                                0.00094,
+                                0.00119
+                            ],
+                            "b2b same arena": [
+                                0.00229,
+                                0.0015
+                            ],
+                            "1 day": [
+                                8e-05,
+                                0.00089
+                            ]
+                        },
+                        "ORB": {
+                            "b2b traveled": [
+                                -0.004,
+                                0.00235
+                            ],
+                            "b2b same arena": [
+                                -0.00298,
+                                0.00296
+                            ],
+                            "1 day": [
+                                -2e-05,
+                                0.00176
+                            ]
+                        },
+                        "FTR": {
+                            "b2b traveled": [
+                                -0.00131,
+                                0.00279
+                            ],
+                            "b2b same arena": [
+                                -0.00674,
+                                0.00351
+                            ],
+                            "1 day": [
+                                -0.0029,
+                                0.00209
+                            ]
+                        }
+                    }
+                },
+                "difference, b2b + 1 day": {
+                    "parameters": 8,
+                    "log_likelihood_gain": 13.63,
+                    "aic_gain": 11.26,
+                    "held_out_gain": 2.4,
+                    "usable": true,
+                    "estimate": {
+                        "eFG": {
+                            "b2b": [
+                                -0.00695,
+                                0.00191
+                            ],
+                            "1 day": [
+                                -0.00086,
+                                0.00156
+                            ]
+                        },
+                        "TOV": {
+                            "b2b": [
+                                0.00136,
+                                0.00109
+                            ],
+                            "1 day": [
+                                7e-05,
+                                0.00089
+                            ]
+                        },
+                        "ORB": {
+                            "b2b": [
+                                -0.00368,
+                                0.00216
+                            ],
+                            "1 day": [
+                                -2e-05,
+                                0.00176
+                            ]
+                        },
+                        "FTR": {
+                            "b2b": [
+                                -0.00301,
+                                0.00256
+                            ],
+                            "1 day": [
+                                -0.00289,
+                                0.00209
+                            ]
+                        }
+                    }
+                },
+                "difference, b2b": {
+                    "parameters": 4,
+                    "log_likelihood_gain": 12.52,
+                    "aic_gain": 17.04,
+                    "held_out_gain": 1.98,
+                    "usable": true,
+                    "estimate": {
+                        "eFG": {
+                            "b2b": [
+                                -0.0063,
+                                0.00149
+                            ]
+                        },
+                        "TOV": {
+                            "b2b": [
+                                0.00131,
+                                0.00085
+                            ]
+                        },
+                        "ORB": {
+                            "b2b": [
+                                -0.00366,
+                                0.00168
+                            ]
+                        },
+                        "FTR": {
+                            "b2b": [
+                                -0.0008,
+                                0.002
+                            ]
+                        }
+                    }
+                },
+                "difference, linear in days": {
+                    "parameters": 4,
+                    "log_likelihood_gain": 9.71,
+                    "aic_gain": 11.42,
+                    "held_out_gain": 1.1,
+                    "usable": true,
+                    "estimate": {
+                        "eFG": {
+                            "per day of rest": [
+                                0.00351,
+                                0.00096
+                            ]
+                        },
+                        "TOV": {
+                            "per day of rest": [
+                                -0.00069,
+                                0.00055
+                            ]
+                        },
+                        "ORB": {
+                            "per day of rest": [
+                                0.00187,
+                                0.00108
+                            ]
+                        },
+                        "FTR": {
+                            "per day of rest": [
+                                0.00149,
+                                0.00128
+                            ]
+                        }
+                    }
+                }
+            },
+            "likelihood_ratio_tests": [
+                {
+                    "test": "both teams vs difference (b2b + 1 day)",
+                    "bigger": "both, b2b + 1 day",
+                    "nested": "difference, b2b + 1 day",
+                    "chi2": 8.9029,
+                    "df": 8,
+                    "p": 0.3506
+                },
+                {
+                    "test": "both teams vs difference (b2b)",
+                    "bigger": "both, b2b",
+                    "nested": "difference, b2b",
+                    "chi2": 1.2651,
+                    "df": 4,
+                    "p": 0.8673
+                },
+                {
+                    "test": "a 1-day effect",
+                    "bigger": "difference, b2b + 1 day",
+                    "nested": "difference, b2b",
+                    "chi2": 2.2134,
+                    "df": 4,
+                    "p": 0.6966
+                },
+                {
+                    "test": "travel on back-to-backs",
+                    "bigger": "difference, b2b + 1 day + travel",
+                    "nested": "difference, b2b + 1 day",
+                    "chi2": 4.9629,
+                    "df": 4,
+                    "p": 0.2911
+                }
+            ],
+            "held_out": "fit on the first two training seasons, log-likelihood gain on the third",
+            "margin_points": {
+                "b2b vs 2+": -2.566
+            },
+            "margin_points_se": 0.522,
+            "margin_points_by_factor_b2b": {
+                "eFG": -1.837,
+                "TOV": -0.347,
+                "ORB": -0.353,
+                "FTR": -0.029
+            },
+            "margin_basis": {
+                "line": {
+                    "eFG": 0.545,
+                    "TOV": 0.1409,
+                    "ORB": 0.2924,
+                    "FTR": 0.2545
+                },
+                "possessions": 99.79
+            },
+            "pace": {
+                "b2b": -0.1348,
+                "1": -0.274,
+                "b2b_se": 0.1604,
+                "1_se": 0.1173,
+                "games": 3956,
+                "log_likelihood_gain": 2.8369,
+                "used": false
+            },
+            "joint_home_check": {
+                "eFG": {
+                    "home_gap_change": -6e-05,
+                    "se": 0.00144
+                },
+                "TOV": {
+                    "home_gap_change": 0.0,
+                    "se": 0.00082
+                },
+                "ORB": {
+                    "home_gap_change": -2e-05,
+                    "se": 0.00162
+                },
+                "FTR": {
+                    "home_gap_change": -4e-05,
+                    "se": 0.00192
+                }
+            },
+            "fitted": "2026-11-18"
+        }
     }
 }

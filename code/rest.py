@@ -20,8 +20,11 @@ so the long summer gap and a season opener are both "2+". Scheduled games count 
 an upcoming game depends on the games before it); postponed ones ("postponedStatus" "Y") and
 games whose teams aren't known yet (Cup knockouts) don't.
 
-Both the Kaggle training rows and NBA.com agree on every training game's date (checked when
-Phase 9 was built: 0 mismatches over 7,926 rows), so one source serves training and 2026-27.
+The Kaggle training rows and NBA.com agree on every training game's date (0 mismatches over
+7,926 rows), so one source serves training and 2026-27. NBA.com also has 6 games the Kaggle CSV
+lacks altogether (the 2023 and 2024 NBA Cup finals and 4 regular-season games: 0022400532,
+0022400537, 0022400538, 0022400617). They aren't training rows, but they were played, so they
+count for rest: 10 training rows get "1" where the Kaggle dates alone would say "2+".
 """
 from datetime import date
 
@@ -109,22 +112,30 @@ def rest_games(game_ids) -> dict:
     return out
 
 
-def rest_on_date(raw: dict, team_id: str, day: str) -> dict:
+def rest_lookup(raw: dict):
     """
-    Rest info for a team's game on `day` (YYYY-MM-DD) from one season's schedule, for games
-    that aren't matched by gameId (the website's ESPN games): the team's game that day if the
-    schedule has it, else computed from its last game before `day` (arena unknown).
+    lookup(team_id, day) -> rest info for a team's game on `day` (YYYY-MM-DD), from one
+    season's schedule, for games that aren't matched by gameId (the website's ESPN games):
+    the team's game that day if the schedule has it, else computed from its last counted game
+    before `day` (arena unknown, so traveled is None); a team with no game before `day` is an
+    opener ("2+").
     """
     games = schedule_games(raw)
     table = rest_table(games)
-    team_id = str(team_id)
-    mine = sorted((g for g in games if team_id in (g["home"], g["away"])), key=lambda g: (g["date"], g["game_id"]))
-    for g in mine:
-        if g["date"] == day:
-            return table[g["game_id"]][team_id]
-    before = [g for g in mine if g["date"] < day and g["season"] == boxscores.season_of(mine[-1]["game_id"])] \
-        if mine else []
-    if not before:
-        return {"days": None, "rest": BASELINE, "traveled": None, "opener": True}
-    days = (date.fromisoformat(day) - date.fromisoformat(before[-1]["date"])).days - 1
-    return {"days": days, "rest": category(days), "traveled": None, "opener": False}
+    by_team = {}
+    for g in sorted(games, key=lambda g: (g["date"], g["game_id"])):
+        for team in (g["home"], g["away"]):
+            by_team.setdefault(team, []).append(g)
+
+    def lookup(team_id, day: str) -> dict:
+        mine = by_team.get(str(team_id), [])
+        for g in mine:
+            if g["date"] == day:
+                return table[g["game_id"]][str(team_id)]
+        before = [g for g in mine if g["date"] < day]
+        if not before:
+            return {"days": None, "rest": BASELINE, "traveled": None, "opener": True}
+        days = (date.fromisoformat(day) - date.fromisoformat(before[-1]["date"])).days - 1
+        return {"days": days, "rest": category(days), "traveled": None, "opener": False}
+
+    return lookup

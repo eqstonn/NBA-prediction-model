@@ -26,7 +26,8 @@ def load_model(priors_path=None):
 
 def predict_game(home_id: str, away_id: str, model: dict, seed=None, sigma=None,
                  sim_corr: str = params.DEFAULT_SIM_CORR_MODE, pace: str = params.DEFAULT_PACE_MODE,
-                 home: str = params.DEFAULT_HOME_MODE, neutral: bool = False):
+                 home: str = params.DEFAULT_HOME_MODE, neutral: bool = False,
+                 rest: str = params.DEFAULT_REST_MODE, rest_home=None, rest_away=None):
     """
     Returns:
         {"home_win_pct": float, "away_win_pct": float,
@@ -35,12 +36,13 @@ def predict_game(home_id: str, away_id: str, model: dict, seed=None, sigma=None,
     `sigma` overrides the simulation's game noise (default params.sim_sigma(): fitted);
     sim_corr / pace / home: "on" or "off" (defaults in params.py: sim_corr off, pace on,
     home on; see simulation.py). pace on needs team paces in `model`. neutral=True:
-    a neutral-site game, no home boost.
+    a neutral-site game, no home boost. rest="on" (default off): rest_home / rest_away are
+    the teams' rest ("b2b", "1", "2+"; rest.py).
     """
     if home_id not in model or away_id not in model:
         return None
     r = simulate_factors(home_id, away_id, model, seed=seed, sigma=sigma, sim_corr=sim_corr, pace=pace,
-                         home=home, neutral=neutral)
+                         home=home, neutral=neutral, rest=rest, rest_a=rest_home, rest_b=rest_away)
     return {
         "home_win_pct": float(r["team_a_win_pct"]),
         "away_win_pct": float(r["team_b_win_pct"]),

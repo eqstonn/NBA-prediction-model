@@ -38,6 +38,15 @@ Home court (Phase 8), "on" or "off", default "on":
             home["offense"][f], the away team's offensive line (what the home defense
             allows) gets home["defense"][f]. Neutral-site games get nothing.
             code/fit_home.py estimates it from the training data only.
+
+Rest (Phase 9), "on" or "off", default "off" (not live):
+
+  rest      add model_params.json["rest"] to the expected value of each line in the update
+            and the simulation, from both teams' rest (rest.py: "b2b", "1", "2+"): a line
+            whose offense team has rest r_o and whose defense team has rest r_d gets
+            rest["offense"][r_o][f] + rest["defense"][r_d][f] ("2+" and any category not
+            listed: 0). It adds to the home boost. code/fit_rest.py estimates it from the
+            training data only (the difference form: defense = -offense, back-to-backs only).
 """
 import json
 import math
@@ -58,6 +67,8 @@ SWITCH_MODES = ("on", "off")
 DEFAULT_SIM_CORR_MODE = "off"
 DEFAULT_PACE_MODE = "on"
 DEFAULT_HOME_MODE = "on"
+DEFAULT_REST_MODE = "off"
+REST_CATEGORIES = ("b2b", "1", "2+")   # rest.CATEGORIES; "2+" is the baseline (no shift)
 # rows/columns of the factor correlation: the team's offensive line, then the opponent's
 CORR_LABELS = tuple(f"team {f}" for f in FACTORS) + tuple(f"opponent {f}" for f in FACTORS)
 
@@ -114,7 +125,8 @@ def is_on(mode: str, what: str = "switch") -> bool:
     return mode == "on"
 
 
-FITTED_BY = {"factor_corr": "fit_sim.py", "points": "fit_sim.py", "pace": "fit_sim.py", "home": "fit_home.py"}
+FITTED_BY = {"factor_corr": "fit_sim.py", "points": "fit_sim.py", "pace": "fit_sim.py", "home": "fit_home.py",
+             "rest": "fit_rest.py"}
 
 
 def section(name: str) -> dict:
@@ -218,3 +230,69 @@ def home_offsets(mode: str = DEFAULT_HOME_MODE, neutral: bool = False, boost=Non
         return None, None
     b = check_home(boost) if boost is not None else home_boost()
     return b["offense"], b["defense"]
+
+
+def combine_offsets(*offsets):
+    """The sum of several {factor: shift} offsets (None = nothing); None when every one is None."""
+    present = [o for o in offsets if o is not None]
+    if not present:
+        return None
+    if len(present) == 1:
+        return present[0]
+    return {f: sum(o[f] for o in present) for f in FACTORS}
+
+
+# ---------------------------------------------------------------------------
+# Phase 9: rest
+# ---------------------------------------------------------------------------
+
+def check_rest(effects: dict) -> dict:
+    """
+    {"offense": {category: {factor: shift}}, "defense": {...}} with categories from
+    REST_CATEGORIES except the baseline "2+", a small number for every factor.
+    """
+    out = {}
+    for side in ("offense", "defense"):
+        cats = effects.get(side)
+        if not isinstance(cats, dict) or not set(cats) <= set(REST_CATEGORIES[:-1]):
+            raise ValueError(f"rest {side} must map categories {REST_CATEGORIES[:-1]} to shifts, got {cats}")
+        out[side] = {}
+        for cat, values in cats.items():
+            if set(values) != set(FACTORS) or not all(isinstance(v, (int, float)) and abs(v) < 0.2
+                                                      for v in values.values()):
+                raise ValueError(f"rest {side} {cat} must have a small number for each of {FACTORS}, got {values}")
+            out[side][cat] = {f: float(values[f]) for f in FACTORS}
+    return out
+
+
+def rest_effects() -> dict:
+    """The fitted rest effects (model_params.json["rest"])."""
+    return check_rest(section("rest"))
+
+
+def _check_category(rest):
+    if rest not in REST_CATEGORIES:
+        raise ValueError(f"unknown rest category {rest!r}; use one of {REST_CATEGORIES}")
+
+
+def rest_offset(mode: str, offense_rest, defense_rest, effects=None):
+    """
+    The rest shift of one line, {factor: shift}: the offense team's rest `offense_rest` and
+    the defense team's `defense_rest` (each "b2b", "1" or "2+"). None when rest is off.
+    effects: default rest_effects().
+    """
+    if not is_on(mode, "rest"):
+        return None
+    _check_category(offense_rest)
+    _check_category(defense_rest)
+    e = check_rest(effects) if effects is not None else rest_effects()
+    zero = {f: 0.0 for f in FACTORS}
+    o, d = e["offense"].get(offense_rest, zero), e["defense"].get(defense_rest, zero)
+    return {f: o[f] + d[f] for f in FACTORS}
+
+
+def rest_offsets(mode: str, rest_a, rest_b, effects=None):
+    """(shift of team a's line, shift of team b's line) for a game where team a has rest `rest_a`, b `rest_b`."""
+    if not is_on(mode, "rest"):
+        return None, None
+    return rest_offset(mode, rest_a, rest_b, effects), rest_offset(mode, rest_b, rest_a, effects)

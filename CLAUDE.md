@@ -13,7 +13,7 @@ A Bayesian NBA game predictor. Each team has independent **offensive** and **def
 
 - `priors.json` was trained on all games **before the current (2026-27) season** started, using the Kaggle "NBA Dataset: Box Scores and Stats (1947 - Today)" CSV.
 - **Next goal:** take games played this season, update the priors from each one (online learning, no retraining from scratch), and keep predicting upcoming games. The README's v2.0 "Automated Daily Updater" (fetch box scores with `nba_api`) is this feature.
-- **Other v2.0 roadmap items:** time decay so recent games weigh more, and garbage-time filtering (15+ point margins in the 4th quarter). Dynamic pace (Phase 7) and the home-court boost (Phase 8) are live, together with the fitted simulation σ (the **pace-home switch**, see the comparisons in Gotchas).
+- **Other v2.0 roadmap items:** time decay so recent games weigh more, and garbage-time filtering (15+ point margins in the 4th quarter). Dynamic pace (Phase 7) and the home-court boost (Phase 8) are live, together with the fitted simulation σ (the **pace-home switch**, see the comparisons in Gotchas). Rest days / back-to-backs (Phase 9, `--rest on`) exist but are **not live** (default off, pending the user's decision).
 
 ## Commands
 
@@ -45,8 +45,12 @@ python code/compare.py log_base.csv log_other.csv        # side-by-side accuracy
 python code/fit_sigma.py --overwrite                     # refit per-factor noise sigma on the training data -> model_params.json (~45 s)
 python code/fit_sim.py --overwrite                       # refit factor correlation, points formula, pace sigma -> model_params.json (~5 s)
 python code/fit_home.py --overwrite                      # refit the home-court boost -> model_params.json["home"] (~15 s)
+python code/fit_rest.py --overwrite                      # refit the rest (back-to-back) effect -> model_params.json["rest"] (~3 s)
+python code/dynamic_model.py --out x.json --before 2026-10-03 --rest on   # = priors_pre_2026-27_pace-home-rest.json
+python code/update.py --replay --from priors_pre_2026-27_pace-home-rest.json --out x.json --log x.csv --rest on   # = log_pace-home-rest.csv
 python code/train_calibration.py --variants old-live live --home off on   # old vs new live simulation on ~2,600 training games (~40 s)
 python code/train_calibration.py --home off on           # every simulation variant (~2 min)
+python code/train_calibration.py --variants live --rest off on   # the live model without / with rest (~30 s)
 # LIVE DEFAULTS everywhere (params.py): --engine exact, --sigma-update fitted, --sigma-sim fitted, --pace on,
 #        --sim-corr off, --home on. They need priors with team paces (priors.json, priors_pre_2026-27_pace-home.json).
 # The previous live model (Phase 6) is --sigma-sim legacy --pace off --home off (from priors_pre_2026-27_sigma-update.json;
@@ -54,9 +58,11 @@ python code/train_calibration.py --home off on           # every simulation vari
 # Noise: --sigma-update fitted|legacy (update.py, dynamic_model.py) and --sigma-sim fitted|legacy (update.py, build_site.py).
 # Simulation (Phase 7): --sim-corr on|off and --pace on|off (update.py, build_site.py; --pace also dynamic_model.py).
 # Home court (Phase 8): --home on|off (update.py, dynamic_model.py, build_site.py).
+# Rest (Phase 9): --rest on|off (update.py, dynamic_model.py, build_site.py; train_calibration.py --rest off on),
+#        default off; --rest off reproduces log_pace-home.csv and the live priors exactly.
 # --replay and dynamic_model.py never replace an existing output file unless you pass --overwrite.
 
-python -m pytest tests                                   # tests (~60 s; real PyMC fits + a fake NBA.com; never touch the real priors.json)
+python -m pytest tests                                   # tests (~95 s; real PyMC fits + a fake NBA.com; never touch the real priors.json)
 ```
 
 No linter or build step. The repo is on GitHub (`eqstonn/NBA-prediction-model`). **Never commit, push or open PRs. The user makes all commits and pushes themselves**, even when a task spec says "commit": make changes, leave them uncommitted, and hand over a commit message plus the exact `git add` commands. `.gitignore` ignores `stats/`, `site/`, `venv/`, `__pycache__/` and `.pytest_cache/`.
@@ -99,6 +105,16 @@ All code is in `code/` as flat scripts that import each other by bare module nam
   - **Recorded data:** game dicts carry `"neutral"`, and new `applied_games.json` entries record `neutral` and `home`. `schedule.py` sets `neutral` for the website (NBA.com `isNeutral` / ESPN `neutralSite`).
   - **Files:** `priors_pre_2026-27_home.json` = the sigma-update training with the boost; `priors_2026-27_home.json` / `log_home.csv` = its replay (legacy sim σ, pace off).
   - **Live files (pace-home):** `priors_pre_2026-27_pace-home.json` = training with the live defaults (= the home training's factor curves + the pace training's paces; `--start-season`'s source, read-only); `priors_2026-27_pace-home.json` / `log_pace-home.csv` = its replay with N=20, M=30.
+- **Rest** (`--rest on`, Phase 9, default off; `model_params.json["rest"]`, fitted by **`fit_rest.py`** from training data only).
+  - **Rest days** (`rest.py`) come from NBA.com's season schedules (the same `stats/schedules/` cache as the neutral flags; `rest.rest_games(ids)` reads it and downloads only what's missing). Per team and game: `days` off since its previous game in the same season, category `"b2b"` (0), `"1"`, `"2+"`, and on back-to-backs `traveled` (last night's `arenaName` differs). Counted games: types 002/004/005/006 with known teams, not postponed; preseason (001) and All-Star (003) don't count. **Openers are `"2+"`**, and the previous season never counts, however close.
+  - **Data check:** NBA.com and Kaggle agree on every training game's date. NBA.com also has 6 games the Kaggle CSV lacks altogether (2023 and 2024 Cup finals, 4 regular-season games); they count for rest, so 10 training rows get `"1"` where Kaggle's dates alone say `"2+"`.
+  - **Counts:** training team-games: b2b 1,309 (876 traveled, 433 same arena: mostly home-home), 1 day 4,899, 2+ 1,704; 1,112 of 3,963 games have a team on a b2b. **2026-27 (210 games): 61 games with a team on a b2b, 13 with both, so 48 where rest differs.**
+  - **Model:** a line's expected value gets `rest["offense"][rest of the offense team] + rest["defense"][rest of the defense team]` ("2+" = 0), added to the home boost (`params.rest_offsets`, `combine_offsets`). Game dicts carry `"rest": {"home": cat, "away": cat}` (`update.add_rest`); `simulate_factors(..., rest, rest_a, rest_b)`, `predict_game(..., rest, rest_home, rest_away)`; the website uses `rest.rest_lookup` (by team and date, since ESPN ids aren't NBA ids). New `applied_games.json` entries record `rest`.
+  - **Fit method:** the same one-step-ahead likelihood as `fit_home.py`, but solved exactly: in the exact (Kalman) update the variances don't depend on the observations and the means are linear in `y − offset`, so the forecast residuals are exactly linear in the rest parameters (checked to 1e-15). One training pass per parameter gives the linear map; the maximum is weighted least squares with exact SEs.
+  - **Form chosen: the rest difference, back-to-backs only** (`defense = −offense`, one parameter per factor; two equally rested teams get nothing). Best AIC of 7 forms (+17.0). Both-teams vs difference: LR χ² 1.3 on 4 df, p = 0.87 (8.9 on 8, p = 0.35 with 1 day); a 1-day effect: p = 0.70; splitting b2b by travel: p = 0.29 (same-arena b2bs even look worse). On a held-out third season every difference form gains (+1.1 to +2.4), the chosen one +2.0.
+  - **Effect** on a line whose offense is on a b2b (opposite sign when its defense is), SE: eFG −0.0063 (0.0015), TOV +0.0013 (0.0009), ORB −0.0037 (0.0017), FTR −0.0008 (0.0020). **A b2b team vs a rested one: −2.57 pts of margin (SE 0.52)**, at league-average teams and pace; eFG alone is −1.84.
+  - **No pace effect:** b2b −0.14 (0.16) possessions per team. Refitting the home gap jointly with rest moves it by ≤ 0.0001, so rest and home aren't confounded.
+  - **Files:** `priors_pre_2026-27_pace-home-rest.json` (training with the live defaults + rest; factor curves differ, paces identical), `priors_2026-27_pace-home-rest.json` / `log_pace-home-rest.csv` (replay, N=20, M=30).
 - **`train_calibration.py`** checks every simulation setting on the training data, with no 2026-27 game. Its variants spell out every switch: `live` = fitted sim σ + pace (the live simulation), `old-live` = legacy sim σ, pace off (Phase 6); `--home` defaults to on. It runs the exact training pass (plus paces, plus the boost with `--home on`) and simulates each NBA game after the first season one step ahead, with the home team as team_a. It prints Brier, accuracy, confidence, totals, home margin, simulated vs real margin SD and slope, plus paired Brier differences with SEs.
 - **The live model is the pace-home pipeline**: `priors.json` = `priors_2026-27_pace-home.json` (exact training + exact replay from `priors_pre_2026-27_pace-home.json`, N=20, M=30; fitted σ in the update and the simulation, team paces, home boost, sim_corr off). All 210 games in `applied_games.json` are recorded as `engine: "exact"`, `sigma_update: "fitted"`, `sigma_sim: "fitted"`, `sim_corr: "off"`, `pace: "on"`, `home: "on"` plus their `neutral` flag (only `0022600189`), keyed in (date, gameId) order, the same order as `log_pace-home.csv`. Before that, the Phase 6 sigma-update pipeline was live (`priors_2026-27_sigma-update.json`), and before that `priors_2026-27_exact.json` (commit `ba4fdd3`). Use the defaults for everything.
 - `state_manager.default_priors(team_ids)` returns the flat starting curves; `initialize_priors` writes them to `priors.json` (destructive).
@@ -169,6 +185,10 @@ It has 37 keys: the 30 NBA teams plus a few non-NBA teams from the Kaggle data. 
   - **Pace-home switch (live):** pace + fitted sim σ + home, sim_corr off, N=20, M=30.
     - **This season:** `log_pace-home.csv` gets 65.7%, spread MAE 12.04, Brier 0.2117, confidence 62.5%, total 226.9 vs 227.4 actual, home margin +1.54 vs +1.36. Versus `log_sigma-update`: **+0.0060 Brier = +1.3 paired SE** (20 picks differ, the new pick is right in 6); versus `log_home`: +0.0053 (+1.3 SE). Worse on these 210 games, but not significantly, and these games' accuracy is ~2 SE above what their own error spread predicts (Phase 7 note).
     - **Training check** (`train_calibration.py --variants old-live live --home off on`, 2,636 games): old live (old-live, home off) Brier 0.2346, overconfident by 6.0 pts; **live (home on) 0.2264, confidence − accuracy −0.3 pts, −0.0082 = 5.5 paired SE better**. Live without home: 0.2289 (−4.5 SE); old-live with home: 0.2316 (−2.8 SE). The switch was made on this evidence.
+  - **Phase 9, rest** (live settings + `--rest on`):
+    - **This season:** `log_pace-home-rest.csv` gets 67.6% (vs 65.7%), spread MAE 11.96 (12.04), Brier 0.2110 (0.2117), confidence 62.5% (62.5%), total 226.9 vs 227.4 (unchanged), home margin +1.50 vs +1.36 actual (+1.54). Versus `log_pace-home`: **−0.0007 Brier = −0.4 paired SE**; 10 picks differ, the rest pick is right in 7. On the 48 games where exactly one team was on a b2b, that team's margin was −2.38 actual, +0.76 projected by the live model, −1.81 with rest (Brier −0.0015, SE 0.0079).
+    - **Training check** (`train_calibration.py --variants live --rest off on`, home on): 0.2264 → **0.2255, −0.0009 = −1.6 paired SE**, confidence − accuracy +0.1 pts. The rest effect was fitted on these same games (4 parameters), so this is slightly optimistic.
+    - Not made live (pending the user's decision).
 - **Trained stds collapsed** to ~0.005 because training never re-inflates them (tau=0). The season reset (`0.1/sqrt(N)`) plus per-game tau is what fixes this for 2026-27.
 - **Per-game mean shift = gain × (observed − expected)**, with gain = `(s_o²/2)/V`. At season-start stds the gain is 0.093 with σ = 0.05. With the fitted σ it is about 0.16 for TOV, 0.06 for eFG, 0.05 for ORB and 0.034 for FTR. A fixed cap like "< 0.01" fails on real games, so `test_per_game_mean_shifts_damped` checks `shift ≤ max_gain(σ_f) × |surprise|` for both σ modes.
 - **Smart App Control is on** on this machine. The first import of scipy/pandas DLLs after an install can be blocked ("An Application Control policy has blocked this file") or take ~35 s while Windows checks them. Re-running usually works.

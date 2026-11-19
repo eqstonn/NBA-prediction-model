@@ -81,6 +81,11 @@ value of each line in the update and in the simulation, except at neutral sites 
 NBA.com's schedule, see boxscores.py). Use priors trained with --home on
 (priors_pre_2026-27_pace-home.json). applied_games.json records "home" and "neutral".
 
+Rest (Phase 9, default off): --rest on adds model_params.json["rest"] (fit_rest.py) to the
+expected value of each line in the update and in the simulation, from both teams' rest before
+the game (back-to-back / 1 day / 2+, from NBA.com's schedule, see rest.py). Use priors trained
+with --rest on (priors_pre_2026-27_pace-home-rest.json). applied_games.json records "rest".
+
 --replay rebuilds the season into another file: season reset from --from, then every
 game in applied_games.json oldest first, each predicted + logged into --log before it is
 applied. It writes only --out and --log. Compare logs with code/compare.py.
@@ -102,6 +107,7 @@ from bayes_update import DEFAULT_ENGINE, ENGINES, FACTORS, update_game, update_p
 import boxscores
 import params
 import predlog
+import rest as rest_days
 from predict import predict_game
 from schedule import NBA_TEAMS
 
@@ -205,7 +211,8 @@ def season_tau(m: int) -> float:
 
 
 def apply_game(priors: dict, game: dict, m: int = DEFAULT_M, random_seed=None, engine: str = DEFAULT_ENGINE,
-               sigma=None, pace: str = params.DEFAULT_PACE_MODE, home: str = params.DEFAULT_HOME_MODE) -> dict:
+               sigma=None, pace: str = params.DEFAULT_PACE_MODE, home: str = params.DEFAULT_HOME_MODE,
+               rest: str = params.DEFAULT_REST_MODE) -> dict:
     """
     Update `priors` in place from one finished game (boxscores.py shape): home offense vs
     away defense, then away offense vs home defense, each widened by tau = 0.1/M first.
@@ -214,13 +221,21 @@ def apply_game(priors: dict, game: dict, m: int = DEFAULT_M, random_seed=None, e
     params.pace_tau(m) first (always the exact formula).
     home="on": the expected value of each line includes the home boost
     (params.home_offsets), unless game["neutral"] is True.
+    rest="on": and the rest effect (params.rest_offsets) from game["rest"] = {"home": ..., "away": ...}
+    ("b2b", "1", "2+"; see add_rest).
     """
     with_pace = params.is_on(pace, "pace")
     if with_pace and "possessions" not in game:
         raise KeyError(f"game {game.get('game_id')}: pace is on but the game has no possessions")
     if params.is_on(home, "home") and "neutral" not in game:
         raise KeyError(f"game {game.get('game_id')}: home is on but the game has no neutral-site flag")
+    with_rest = params.is_on(rest, "rest")
+    if with_rest and "rest" not in game:
+        raise KeyError(f"game {game.get('game_id')}: rest is on but the game has no rest days")
     offsets = dict(zip(("home", "away"), params.home_offsets(home, game.get("neutral", False))))
+    if with_rest:
+        shifts = dict(zip(("home", "away"), params.rest_offsets(rest, game["rest"]["home"], game["rest"]["away"])))
+        offsets = {side: params.combine_offsets(offsets[side], shifts[side]) for side in offsets}
     tau = season_tau(m)
     for i, (side, other) in enumerate((("home", "away"), ("away", "home"))):
         row = {"team": game[side]["id"], "opponent": game[other]["id"],
@@ -270,7 +285,7 @@ def record_game(priors: dict, applied: dict, game: dict, engine: str = DEFAULT_E
                 sigma_update: str = params.DEFAULT_UPDATE_SIGMA_MODE,
                 sigma_sim: str = params.DEFAULT_SIM_SIGMA_MODE,
                 sim_corr: str = params.DEFAULT_SIM_CORR_MODE, pace: str = params.DEFAULT_PACE_MODE,
-                home_mode: str = params.DEFAULT_HOME_MODE) -> None:
+                home_mode: str = params.DEFAULT_HOME_MODE, rest_mode: str = params.DEFAULT_REST_MODE) -> None:
     """Save priors.json and record the game in applied_games.json, crash-safely (see module docstring)."""
     home, away = game["home"], game["away"]
     entry = {"date": game["date"],
@@ -284,6 +299,7 @@ def record_game(priors: dict, applied: dict, game: dict, engine: str = DEFAULT_E
              "sim_corr": sim_corr,
              "pace": pace,
              "home": home_mode,
+             "rest": rest_mode,
              "pending": priors_fingerprint(priors)}
     applied[game["game_id"]] = entry
     write_json(APPLIED_GAMES_PATH, applied)   # 1. pending, with the fingerprint of the new priors
@@ -298,13 +314,22 @@ def fit_seed(game_id: str) -> int:
 
 
 def log_prediction(priors: dict, game: dict, log_path, sigma=None, sim_corr: str = params.DEFAULT_SIM_CORR_MODE,
-                   pace: str = params.DEFAULT_PACE_MODE, home: str = params.DEFAULT_HOME_MODE) -> None:
+                   pace: str = params.DEFAULT_PACE_MODE, home: str = params.DEFAULT_HOME_MODE,
+                   rest: str = params.DEFAULT_REST_MODE) -> None:
     """Predict `game` from `priors` (fixed simulation seed) and append it to the log unless it's already there."""
+    days = game.get("rest", {})
     prediction = predict_game(game["home"]["id"], game["away"]["id"], priors, seed=predlog.PREDICT_SEED, sigma=sigma,
-                              sim_corr=sim_corr, pace=pace, home=home, neutral=game.get("neutral", False))
+                              sim_corr=sim_corr, pace=pace, home=home, neutral=game.get("neutral", False),
+                              rest=rest, rest_home=days.get("home"), rest_away=days.get("away"))
     if prediction is None:
         raise KeyError(f"game {game['game_id']}: a team is missing from the priors")
     predlog.append_rows(log_path, [predlog.make_row(game, prediction)])
+
+
+def add_rest(game: dict, table: dict) -> dict:
+    """The game with "rest": {"home": category, "away": category} from a rest.rest_games table."""
+    info = table[game["game_id"]]
+    return {**game, "rest": {side: info[game[side]["id"]]["rest"] for side in ("home", "away")}}
 
 
 def print_log_metrics(log_path) -> dict:
@@ -317,7 +342,7 @@ def run_update(through=None, limit=None, m: int = DEFAULT_M, log_path=None, engi
                sigma_update: str = params.DEFAULT_UPDATE_SIGMA_MODE,
                sigma_sim: str = params.DEFAULT_SIM_SIGMA_MODE,
                sim_corr: str = params.DEFAULT_SIM_CORR_MODE, pace: str = params.DEFAULT_PACE_MODE,
-               home: str = params.DEFAULT_HOME_MODE) -> dict:
+               home: str = params.DEFAULT_HOME_MODE, rest: str = params.DEFAULT_REST_MODE) -> dict:
     """
     Apply every finished, not-yet-applied game (oldest first) to priors.json; saves after
     each game. Each game is first predicted from the current priors and logged to
@@ -325,6 +350,7 @@ def run_update(through=None, limit=None, m: int = DEFAULT_M, log_path=None, engi
     (YYYY-MM-DD), `limit` = max games to apply. pace="on" also needs each game's
     possessions (a game without them is skipped and not recorded, like missing factors).
     home="on" adds the home boost except at neutral sites (flag from NBA.com's schedule).
+    rest="on" adds the rest effect (both teams' rest from NBA.com's schedule, rest.py).
     Returns {"applied": [ids], "skipped": [(id, reason)], "already": count, "remaining": count,
              "disagreements": [game log vs schedule warnings], "metrics": {...} of the whole log}.
     """
@@ -332,7 +358,8 @@ def run_update(through=None, limit=None, m: int = DEFAULT_M, log_path=None, engi
     update_sigma, sim_sigma = params.update_sigma(sigma_update), params.sim_sigma(sigma_sim)
     params.sim_corr(sim_corr)                     # validates the setting (and the matrix) before any work
     params.home_offsets(home)                     # validates the setting (and the boost) before any work
-    with_pace = params.is_on(pace, "pace")
+    params.rest_offsets(rest, "2+", "2+")         # validates the setting (and the effects) before any work
+    with_pace, with_rest = params.is_on(pace, "pace"), params.is_on(rest, "rest")
     _quiet_pymc()
     applied = load_applied()
     priors = load_json(PRIORS_PATH)
@@ -344,11 +371,12 @@ def run_update(through=None, limit=None, m: int = DEFAULT_M, log_path=None, engi
     schedule = boxscores.select_games(boxscores.fetch_finished_games(disagreements=disagreements), through=through)
     todo = [g for g in schedule if g["game_id"] not in applied]
     already = len(schedule) - len(todo)
+    rest_table = rest_days.rest_games([g["game_id"] for g in todo]) if with_rest and todo else {}
     print(f"{len(schedule)} games from {boxscores.OPENING_NIGHT} through {through or 'today'}: "
           f"{already} already applied, {len(todo)} to go"
           + (f" (stopping after {limit})" if limit is not None and limit < len(todo) else "")
           + f". M={m}, tau={season_tau(m):.5f}, engine={engine}, sigma update={sigma_update} sim={sigma_sim}, "
-            f"sim_corr={sim_corr}, pace={pace}, home={home}\n")
+            f"sim_corr={sim_corr}, pace={pace}, home={home}, rest={rest}\n")
 
     done, skipped = [], []
     start = time.perf_counter()
@@ -374,11 +402,13 @@ def run_update(through=None, limit=None, m: int = DEFAULT_M, log_path=None, engi
         game = boxscores.with_factors(game, factors)
         if with_pace:
             game = boxscores.with_possessions(game, possessions)
+        if with_rest:
+            game = add_rest(game, rest_table)
         # before applying: the prediction uses pre-game priors
-        log_prediction(priors, game, log_path, sim_sigma, sim_corr=sim_corr, pace=pace, home=home)
+        log_prediction(priors, game, log_path, sim_sigma, sim_corr=sim_corr, pace=pace, home=home, rest=rest)
         new_priors = apply_game(copy.deepcopy(priors), game, m, random_seed=fit_seed(game["game_id"]), engine=engine,
-                                sigma=update_sigma, pace=pace, home=home)
-        record_game(new_priors, applied, game, engine, sigma_update, sigma_sim, sim_corr, pace, home)
+                                sigma=update_sigma, pace=pace, home=home, rest=rest)
+        record_game(new_priors, applied, game, engine, sigma_update, sigma_sim, sim_corr, pace, home, rest)
         priors = new_priors
         done.append(game["game_id"])
         print(f"  [{len(done):>4}] {label}  {time.perf_counter() - t:.1f} s")
@@ -412,7 +442,8 @@ def _replay_game(game_id: str, entry: dict, factors: dict) -> dict:
 def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M, engine: str = DEFAULT_ENGINE,
            sigma_update: str = params.DEFAULT_UPDATE_SIGMA_MODE, sigma_sim: str = params.DEFAULT_SIM_SIGMA_MODE,
            overwrite: bool = False, sim_corr: str = params.DEFAULT_SIM_CORR_MODE,
-           pace: str = params.DEFAULT_PACE_MODE, home: str = params.DEFAULT_HOME_MODE) -> dict:
+           pace: str = params.DEFAULT_PACE_MODE, home: str = params.DEFAULT_HOME_MODE,
+           rest: str = params.DEFAULT_REST_MODE) -> dict:
     """
     Season reset from `from_path` (std 0.1/sqrt(n)), then every game in applied_games.json,
     oldest first (date, gameId), each predicted + logged before it is applied. Writes ONLY
@@ -421,7 +452,8 @@ def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M
     --out/--log files are only replaced with overwrite=True (--overwrite).
     pace="on" needs team paces in `from_path` and each game's possessions (advanced box-score cache).
     home="on" takes each game's neutral-site flag from the cached NBA.com schedule
-    (stats/schedules/, downloaded if missing); home="off" never reads it.
+    (stats/schedules/, downloaded if missing); home="off" never reads it. rest="on" takes
+    both teams' rest from the same cached schedule (rest.py).
     """
     from_path, out_path, log_path = Path(from_path), Path(out_path), Path(log_path)
     protected = {p.resolve(): p.name for p in (PRIORS_PATH, APPLIED_GAMES_PATH, FROZEN_PRIORS_PATH, LOG_PATH,
@@ -436,7 +468,9 @@ def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M
     update_sigma, sim_sigma = params.update_sigma(sigma_update), params.sim_sigma(sigma_sim)
     params.sim_corr(sim_corr)                     # validates the setting (and the matrix) before any work
     params.home_offsets(home)                     # validates the setting (and the boost) before any work
+    params.rest_offsets(rest, "2+", "2+")         # validates the setting (and the effects) before any work
     with_pace, with_home = params.is_on(pace, "pace"), params.is_on(home, "home")
+    with_rest = params.is_on(rest, "rest")
     start_priors = load_json(from_path)
     if with_pace:
         require_pace(start_priors, from_path.name)
@@ -446,6 +480,7 @@ def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M
         raise RuntimeError(f"{APPLIED_GAMES_PATH.name} has a pending game; run --update once to resolve it first")
     order = sorted(applied, key=lambda gid: (applied[gid]["date"], gid))
     neutral = boxscores.neutral_games(order) if with_home else {}
+    rest_table = rest_days.rest_games(order) if with_rest else {}
 
     _quiet_pymc()
     priors = reset_priors(start_priors, n)
@@ -453,9 +488,12 @@ def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M
         log_path.unlink()   # a replay rebuilds its log from scratch
     print(f"Replaying {len(order)} games from {applied[order[0]]['date']} to {applied[order[-1]]['date']}, "
           f"oldest first, from {from_path.name} (N={n}, M={m}, engine={engine}, "
-          f"sigma update={sigma_update} sim={sigma_sim}, sim_corr={sim_corr}, pace={pace}, home={home}) "
+          f"sigma update={sigma_update} sim={sigma_sim}, sim_corr={sim_corr}, pace={pace}, home={home}, "
+          f"rest={rest}) "
           f"-> {out_path.name}, {log_path.name}"
-          + (f"; neutral sites: {', '.join(g for g in order if neutral[g]) or 'none'}" if with_home else "") + "\n")
+          + (f"; neutral sites: {', '.join(g for g in order if neutral[g]) or 'none'}" if with_home else "")
+          + (f"; {sum(any(i['rest'] == 'b2b' for i in rest_table[g].values()) for g in order)} games with a team "
+             f"on a back-to-back" if with_rest else "") + "\n")
 
     start = time.perf_counter()
     for i, game_id in enumerate(order, 1):
@@ -470,10 +508,12 @@ def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M
             game = boxscores.with_possessions(game, possessions)
         if with_home:
             game["neutral"] = neutral[game_id]
+        if with_rest:
+            game = add_rest(game, rest_table)
         t = time.perf_counter()
-        log_prediction(priors, game, log_path, sim_sigma, sim_corr=sim_corr, pace=pace, home=home)
+        log_prediction(priors, game, log_path, sim_sigma, sim_corr=sim_corr, pace=pace, home=home, rest=rest)
         apply_game(priors, game, m, random_seed=fit_seed(game_id), engine=engine, sigma=update_sigma, pace=pace,
-                   home=home)
+                   home=home, rest=rest)
         print(f"  [{i:>4}/{len(order)}] {game['date']}  {applied[game_id]['matchup']}  ({game_id})  "
               f"{time.perf_counter() - t:.1f} s")
 
@@ -484,7 +524,7 @@ def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M
 
 def trial(n: int = 5, m: int = DEFAULT_M, engine: str = DEFAULT_ENGINE,
           sigma_update: str = params.DEFAULT_UPDATE_SIGMA_MODE, pace: str = params.DEFAULT_PACE_MODE,
-          home: str = params.DEFAULT_HOME_MODE) -> None:
+          home: str = params.DEFAULT_HOME_MODE, rest: str = params.DEFAULT_REST_MODE) -> None:
     """
     Dry run: apply the season's first n games to an in-memory copy of priors.json. Never
     writes the priors (box scores and schedules are cached as usual). pace="on" also gets
@@ -515,17 +555,22 @@ def trial(n: int = 5, m: int = DEFAULT_M, engine: str = DEFAULT_ENGINE,
     if with_home and games:
         neutral = boxscores.neutral_games([g["game_id"] for g in games])
         games = [{**g, "neutral": neutral[g["game_id"]]} for g in games]
+    if params.is_on(rest, "rest") and games:
+        table = rest_days.rest_games([g["game_id"] for g in games])
+        games = [add_rest(g, table) for g in games]
     fetch_seconds = (time.perf_counter() - start) / max(len(games), 1)
 
     print(f"Applying them to an in-memory copy of {PRIORS_PATH.name} "
-          f"(M={m}, tau={season_tau(m):.5f}, engine={engine}, pace={pace}, home={home}). Nothing is written.\n")
+          f"(M={m}, tau={season_tau(m):.5f}, engine={engine}, pace={pace}, home={home}, rest={rest}). "
+          f"Nothing is written.\n")
 
     seconds, max_shift = [], 0.0
     for game in games:
         home_team, away_team = game["home"], game["away"]   # (`home` is the home-court setting)
         before = copy.deepcopy({t["id"]: priors[t["id"]] for t in (home_team, away_team)})
         start = time.perf_counter()
-        apply_game(priors, game, m, engine=engine, sigma=params.update_sigma(sigma_update), pace=pace, home=home)
+        apply_game(priors, game, m, engine=engine, sigma=params.update_sigma(sigma_update), pace=pace, home=home,
+                   rest=rest)
         seconds.append(time.perf_counter() - start)
 
         winner = home_team if game["winner"] == home_team["id"] else away_team
@@ -588,6 +633,9 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--home", choices=params.SWITCH_MODES, default=params.DEFAULT_HOME_MODE,
                         help="add the fitted home-court boost to the expected value in the update and the "
                              f"simulation (none at neutral sites); default {params.DEFAULT_HOME_MODE}")
+    parser.add_argument("--rest", choices=params.SWITCH_MODES, default=params.DEFAULT_REST_MODE,
+                        help="add the fitted rest effect (back-to-backs, from NBA.com's schedule) to the expected "
+                             f"value in the update and the simulation; default {params.DEFAULT_REST_MODE}")
     parser.add_argument("--overwrite", action="store_true", help="with --replay: allow replacing existing --out/--log")
     parser.add_argument("--log", metavar="CSV",
                         help=f"prediction log (--update default: {LOG_PATH.name}; required with --replay)")
@@ -641,7 +689,7 @@ def main(argv=None):
         try:
             replay(args.from_path, args.out, args.log, n=args.n, m=args.m, engine=args.engine,
                    sigma_update=args.sigma_update, sigma_sim=args.sigma_sim, overwrite=args.overwrite,
-                   sim_corr=args.sim_corr, pace=args.pace, home=args.home)
+                   sim_corr=args.sim_corr, pace=args.pace, home=args.home, rest=args.rest)
         except ValueError as err:
             parser.error(str(err))
         return
@@ -662,10 +710,10 @@ def main(argv=None):
                 parser.error(str(err))
         run_update(through=args.through, limit=args.limit, m=args.m, log_path=args.log, engine=args.engine,
                    sigma_update=args.sigma_update, sigma_sim=args.sigma_sim, sim_corr=args.sim_corr, pace=args.pace,
-                   home=args.home)
+                   home=args.home, rest=args.rest)
     if args.trial is not None:
         trial(args.trial, args.m, engine=args.engine, sigma_update=args.sigma_update, pace=args.pace,
-              home=args.home)
+              home=args.home, rest=args.rest)
 
 
 if __name__ == "__main__":

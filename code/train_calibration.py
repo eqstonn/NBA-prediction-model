@@ -4,6 +4,7 @@ How well calibrated is each simulation setting? Checked on the TRAINING data (no
     python code/train_calibration.py                                   # every variant, home on (the default)
     python code/train_calibration.py --home off on                     # ... and again without the home boost
     python code/train_calibration.py --variants old-live live --home off on   # old vs new live simulation
+    python code/train_calibration.py --variants live --rest off on      # the live model without / with rest
 
 It runs the exact training pass over the Kaggle window (flat start, tau = 0, fitted update
 sigma, plus team paces), and before each NBA-vs-NBA game after the first season it simulates
@@ -11,6 +12,9 @@ that game with every variant from the curves as they stood: one-step-ahead forec
 fit_sigma.py, for ~2,600 games instead of this season's ~200. The home team is team_a.
 With --home on, both the training pass and the simulation use the home boost
 (model_params.json["home"]; none at neutral sites), so each home setting is its own pass.
+Likewise --rest on uses the rest effect (model_params.json["rest"], both teams' rest from the
+training seasons' NBA.com schedules) in the training pass and the simulation; each
+(home, rest) combination is its own pass.
 
 Variants (the simulation settings, every switch spelled out so the params.py defaults don't
 leak in; the update is always the same):
@@ -54,15 +58,18 @@ VARIANTS = {
 BURN_IN_DAYS = 365
 
 
-def run_pass(data: dict, home: str, variants: list) -> dict:
+def run_pass(data: dict, home: str, variants: list, rest: str = params.DEFAULT_REST_MODE) -> dict:
     """
     {variant: [(p_home, actual home margin, projected margin, projected total, actual total, sim margin SD)]}
-    for every scored game, simulated with `home` from the one-step-ahead curves of the training pass.
+    for every scored game, simulated with `home` and `rest` from the one-step-ahead curves of the training pass.
     """
     cleaned = data["cleaned"]
-    with_home = params.is_on(home, "home")
+    with_home, with_rest = params.is_on(home, "home"), params.is_on(rest, "rest")
     sides = dynamic_model.row_sides(data) if with_home else None
     offsets = dynamic_model.row_offsets(sides) if with_home else [None] * len(data["rows"])
+    rest_rows = dynamic_model.row_rest(data) if with_rest else [None] * len(data["rows"])
+    if with_rest:
+        offsets = [params.combine_offsets(h, r) for h, r in zip(offsets, dynamic_model.row_rest_offsets(rest_rows))]
     first_day = cleaned["gameDateTimeEst"].min().toordinal()
 
     by_game = {}
@@ -72,7 +79,8 @@ def run_pass(data: dict, home: str, variants: list) -> dict:
         g = dynamic_model.row_to_game(row)
         g = {**g, **{f: float(g[f]) for f in params.FACTORS}}
         entry = by_game.setdefault(str(gid), {"rows": [], "when": when})
-        entry["rows"].append((g, offsets[i], int(home_flag) == 1, float(score), sides[i] if sides else None))
+        entry["rows"].append((g, offsets[i], int(home_flag) == 1, float(score), sides[i] if sides else None,
+                              rest_rows[i]))
     possessions = {g["game_id"]: g for g in data["possessions"]}
 
     pp = params.pace_params()
@@ -94,8 +102,10 @@ def run_pass(data: dict, home: str, variants: list) -> dict:
             home_id, away_id = home_row[0]["team"], away_row[0]["team"]
             neutral = with_home and home_row[4] is None
             margin, total = home_row[3] - away_row[3], home_row[3] + away_row[3]
+            days = {"rest_a": home_row[5][0]["rest"], "rest_b": home_row[5][1]["rest"]} if with_rest else {}
             for v, kw in settings.items():
-                r = simulation.simulate_factors(home_id, away_id, priors, seed=k, home=home, neutral=neutral, **kw)
+                r = simulation.simulate_factors(home_id, away_id, priors, seed=k, home=home, neutral=neutral,
+                                                rest=rest, **days, **kw)
                 out[v].append((r["team_a_win_pct"] / 100, margin, r["team_a_avg_score"] - r["team_b_avg_score"],
                                r["team_a_avg_score"] + r["team_b_avg_score"], total, r["margin_sd"]))
         for g, offset, *_ in rows:
@@ -124,6 +134,9 @@ def main(argv=None):
     parser.add_argument("--home", nargs="+", choices=params.SWITCH_MODES, default=[params.DEFAULT_HOME_MODE],
                         help="home boost setting(s); each is its own training pass "
                              f"(default {params.DEFAULT_HOME_MODE})")
+    parser.add_argument("--rest", nargs="+", choices=params.SWITCH_MODES, default=[params.DEFAULT_REST_MODE],
+                        help="rest effect setting(s); each is its own training pass "
+                             f"(default {params.DEFAULT_REST_MODE})")
     parser.add_argument("--csv", default=str(dynamic_model.DEFAULT_CSV), help="Kaggle TeamStatisticsExtended.csv")
     parser.add_argument("--before", default=dynamic_model.TRAINING_CUTOFF, metavar="YYYY-MM-DD")
     parser.add_argument("--years", type=int, default=3)
@@ -139,21 +152,24 @@ def main(argv=None):
     data = dynamic_model.load_training_rows(args.csv, before, args.years)
     columns = {}
     for home in dict.fromkeys(args.home):
-        for v, records in run_pass(data, home, args.variants).items():
-            columns[f"{v}, home {home}"] = summarize(records)
+        for rest in dict.fromkeys(args.rest):
+            for v, records in run_pass(data, home, args.variants, rest).items():
+                columns[f"{v}, home {home}" + ("" if args.rest == [params.DEFAULT_REST_MODE] else f", rest {rest}")] = \
+                    summarize(records)
     n = len(next(iter(columns.values()))["brier_each"])
     print(f"{n} NBA training games scored ({data['first']} to {data['last']}, after the first season; "
           f"one-step-ahead) in {time.perf_counter() - start:.0f} s\n")
 
     base_name = next(iter(columns))
     base = columns[base_name]["brier_each"]
-    print(f"{'':<24}{'Brier':>8}{'acc':>8}{'conf':>8}{'conf-acc':>9}{'proj tot':>9}{'actual':>8}"
+    width = max(24, max(len(c) for c in columns) + 2)
+    print(f"{'':<{width}}{'Brier':>8}{'acc':>8}{'conf':>8}{'conf-acc':>9}{'proj tot':>9}{'actual':>8}"
           f"{'proj home':>10}{'actual':>8}{'sim SD':>8}{'real SD':>8}{'slope':>7}   Brier vs {base_name}")
     for name, s in columns.items():
         d = s["brier_each"] - base
         se = d.std(ddof=1) / math.sqrt(len(d))
         versus = "" if name == base_name else f"{d.mean():+.4f} ({d.mean() / se:+.1f} SE)"
-        print(f"{name:<24}{s['brier_each'].mean():>8.4f}{s['accuracy']:>8.1%}{s['confidence']:>8.1%}"
+        print(f"{name:<{width}}{s['brier_each'].mean():>8.4f}{s['accuracy']:>8.1%}{s['confidence']:>8.1%}"
               f"{s['confidence'] - s['accuracy']:>+9.1%}{s['proj_total']:>9.1f}{s['actual_total']:>8.1f}"
               f"{s['proj_home']:>+10.2f}{s['actual_home']:>+8.2f}{s['sim_sd']:>8.1f}{s['real_sd']:>8.1f}"
               f"{s['slope']:>7.2f}   {versus}")
