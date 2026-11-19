@@ -7,6 +7,7 @@ In-season updates to priors.json.
                                                   # reset from the frozen snapshot (no team paces)
     python code/update.py --update                # apply every finished, not-yet-applied game
     python code/update.py --update --through 2026-11-01 --limit 20   # stop at a date / after 20 games
+    python code/update.py --update --lines off    # same, without saving betting lines (lines.py)
     python code/update.py --replay --from priors_pre_2026-27.json --out priors_x.json --log log_x.csv
                                                   # rebuild the season into another file (model experiments)
     python code/update.py --trial 5               # dry run: first 5 games of the season, writes nothing
@@ -88,6 +89,11 @@ expected value of each line in the update and in the simulation, from both teams
 the game (back-to-back / 1 day / 2+, from NBA.com's schedule, see rest.py). Use priors trained
 with --rest on (priors_pre_2026-27_pace-home-rest.json). applied_games.json records "rest".
 
+Betting lines (Phase 10a, --lines on|off, default on; not part of the model): --update also saves
+one snapshot of every upcoming game's Vegas lines from The Odds API into data/lines_2026-27.csv
+(lines.py: ONE API request per run, appended, never overwritten). Without ODDS_API_KEY, or if the
+request fails, it prints a warning and the update goes on as usual.
+
 --replay rebuilds the season into another file: season reset from --from, then every
 game in applied_games.json oldest first, each predicted + logged into --log before it is
 applied. It writes only --out and --log. Compare logs with code/compare.py.
@@ -107,6 +113,7 @@ from pathlib import Path
 # bayes_update sets PYTENSOR_FLAGS before it imports pymc
 from bayes_update import DEFAULT_ENGINE, ENGINES, FACTORS, update_game, update_pace
 import boxscores
+import lines as betting_lines
 import params
 import predlog
 import rest as rest_days
@@ -336,6 +343,26 @@ def add_rest(game: dict, table: dict) -> dict:
     return {**game, "rest": {side: info[game[side]["id"]]["rest"] for side in ("home", "away")}}
 
 
+def save_lines(mode: str = betting_lines.DEFAULT_LINES_MODE):
+    """
+    lines="on": one snapshot of upcoming games' betting lines (lines.fetch_lines). Never stops the
+    update: without ODDS_API_KEY, or when the request fails, it prints a warning and returns None.
+    """
+    if not params.is_on(mode, "lines"):
+        return None
+    if betting_lines.api_key() is None:
+        print(f"WARNING: --lines on but {betting_lines.KEY_ENV} is not set; betting lines not saved "
+              f"(set it, or pass --lines off)\n")
+        return None
+    try:
+        result = betting_lines.fetch_lines()
+    except Exception as err:   # lines are a side job: the model update goes on
+        print(f"WARNING: betting lines not saved: {betting_lines.redact(err)}\n")
+        return None
+    print()
+    return result
+
+
 def print_log_metrics(log_path) -> dict:
     m = predlog.metrics(predlog.read_log(log_path))
     print(f"Prediction log {Path(log_path).name}: {predlog.format_metrics(m)}")
@@ -346,7 +373,8 @@ def run_update(through=None, limit=None, m: int = DEFAULT_M, log_path=None, engi
                sigma_update: str = params.DEFAULT_UPDATE_SIGMA_MODE,
                sigma_sim: str = params.DEFAULT_SIM_SIGMA_MODE,
                sim_corr: str = params.DEFAULT_SIM_CORR_MODE, pace: str = params.DEFAULT_PACE_MODE,
-               home: str = params.DEFAULT_HOME_MODE, rest: str = params.DEFAULT_REST_MODE) -> dict:
+               home: str = params.DEFAULT_HOME_MODE, rest: str = params.DEFAULT_REST_MODE,
+               lines: str = betting_lines.DEFAULT_LINES_MODE) -> dict:
     """
     Apply every finished, not-yet-applied game (oldest first) to priors.json; saves after
     each game. Each game is first predicted from the current priors and logged to
@@ -355,9 +383,12 @@ def run_update(through=None, limit=None, m: int = DEFAULT_M, log_path=None, engi
     possessions (a game without them is skipped and not recorded, like missing factors).
     home="on" adds the home boost except at neutral sites (flag from NBA.com's schedule).
     rest="on" adds the rest effect (both teams' rest from NBA.com's schedule, rest.py).
+    lines="on" also saves a snapshot of upcoming games' betting lines (save_lines; never fails the run).
     Returns {"applied": [ids], "skipped": [(id, reason)], "already": count, "remaining": count,
-             "disagreements": [game log vs schedule warnings], "metrics": {...} of the whole log}.
+             "disagreements": [game log vs schedule warnings], "metrics": {...} of the whole log,
+             "lines": lines.fetch_lines' result, or None when not saved}.
     """
+    params.is_on(lines, "lines")                  # validates the setting before any work
     log_path = Path(log_path or LOG_PATH)
     update_sigma, sim_sigma = params.update_sigma(sigma_update), params.sim_sigma(sigma_sim)
     params.sim_corr(sim_corr)                     # validates the setting (and the matrix) before any work
@@ -383,6 +414,8 @@ def run_update(through=None, limit=None, m: int = DEFAULT_M, log_path=None, engi
           + (f" (stopping after {limit})" if limit is not None and limit < len(todo) else "")
           + f". M={m}, tau={season_tau(m):.5f}, engine={engine}, sigma update={sigma_update} sim={sigma_sim}, "
             f"sim_corr={sim_corr}, pace={pace}, home={home}, rest={rest}\n")
+    # betting lines for upcoming games (the schedule was just refreshed above, for the matching)
+    lines_result = save_lines(lines)
 
     done, skipped = [], []
     start = time.perf_counter()
@@ -425,7 +458,7 @@ def run_update(through=None, limit=None, m: int = DEFAULT_M, log_path=None, engi
           f"{len(disagreements)} game log/schedule disagreement(s).")
     log_metrics = print_log_metrics(log_path)
     return {"applied": done, "skipped": skipped, "already": already, "remaining": remaining,
-            "disagreements": disagreements, "metrics": log_metrics}
+            "disagreements": disagreements, "metrics": log_metrics, "lines": lines_result}
 
 
 # ---------------------------------------------------------------------------
@@ -642,6 +675,10 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rest", choices=params.SWITCH_MODES, default=params.DEFAULT_REST_MODE,
                         help="add the fitted rest effect (back-to-backs, from NBA.com's schedule) to the expected "
                              f"value in the update and the simulation; default {params.DEFAULT_REST_MODE}")
+    parser.add_argument("--lines", choices=params.SWITCH_MODES, default=None,
+                        help="with --update: also save a snapshot of upcoming games' betting lines from The Odds "
+                             f"API (key from {betting_lines.KEY_ENV}; one request; skipped with a warning without "
+                             f"a key); default {betting_lines.DEFAULT_LINES_MODE}")
     parser.add_argument("--overwrite", action="store_true", help="with --replay: allow replacing existing --out/--log")
     parser.add_argument("--log", metavar="CSV",
                         help=f"prediction log (--update default: {LOG_PATH.name}; required with --replay)")
@@ -675,6 +712,9 @@ def main(argv=None):
             parser.error("--through must be a date like 2026-11-01")
     if (args.through or args.limit) and not args.update:
         parser.error("--through and --limit only work with --update")
+    if args.lines is not None and not args.update:
+        parser.error("--lines only works with --update")
+    args.lines = args.lines or betting_lines.DEFAULT_LINES_MODE
     if args.replay:
         if args.start_season or args.update or args.trial is not None:
             parser.error("--replay runs on its own (not with --start-season, --update or --trial)")
@@ -716,7 +756,7 @@ def main(argv=None):
                 parser.error(str(err))
         run_update(through=args.through, limit=args.limit, m=args.m, log_path=args.log, engine=args.engine,
                    sigma_update=args.sigma_update, sigma_sim=args.sigma_sim, sim_corr=args.sim_corr, pace=args.pace,
-                   home=args.home, rest=args.rest)
+                   home=args.home, rest=args.rest, lines=args.lines)
     if args.trial is not None:
         trial(args.trial, args.m, engine=args.engine, sigma_update=args.sigma_update, pace=args.pace,
               home=args.home, rest=args.rest)

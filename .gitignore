@@ -1,6 +1,10 @@
 # Ignore all data files
 stats/
 
+# Secrets (the Odds API key lives in the ODDS_API_KEY environment variable, never in the repo)
+.env
+*.env
+
 # Ignore Python / pytest cache
 __pycache__/
 .pytest_cache/
