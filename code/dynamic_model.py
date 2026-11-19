@@ -28,14 +28,18 @@ from pathlib import Path
 # bayes_update sets PYTENSOR_FLAGS before pymc can be imported
 from bayes_update import DEFAULT_ENGINE, ENGINES, update_game
 from data_prep import create_data_frame, clean_data_frame, get_four_factors
+import params
 from state_manager import default_priors
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CSV_LOCATIONS = [REPO_ROOT / "stats" / "TeamStatisticsExtended.csv",
                  REPO_ROOT / "stats" / "NBA-DataSet" / "TeamStatisticsExtended.csv"]   # loose, or the unzipped Kaggle folder
 DEFAULT_CSV = next((p for p in CSV_LOCATIONS if p.exists()), CSV_LOCATIONS[0])
+# never written, even with --overwrite
 PROTECTED = [REPO_ROOT / name for name in
-             ("priors_pre_2026-27.json", "priors.json", "applied_games.json", "priors_2026-27_base.json")]
+             ("priors_pre_2026-27.json", "priors.json", "applied_games.json", "priors_2026-27_base.json",
+              "model_params.json")]
+TRAINING_CUTOFF = "2026-10-03"   # first day of the 2026-27 preseason (see the module docstring)
 TRAINING_TAU = 0.0
 CHECKPOINT_EVERY = 50   # rows, pymc engine only
 
@@ -66,28 +70,44 @@ def write_priors(path, priors):
     os.replace(tmp, path)
 
 
-def train(four_factors, priors: dict, engine: str = DEFAULT_ENGINE, checkpoint=None) -> dict:
+def train(four_factors, priors: dict, engine: str = DEFAULT_ENGINE, checkpoint=None, sigma=None) -> dict:
     """Apply every row of `four_factors` (oldest first) to `priors` in place; returns `priors`."""
     for count, (_, row) in enumerate(four_factors.iterrows(), 1):
-        update_game(priors, row_to_game(row), tau=TRAINING_TAU, engine=engine)
+        update_game(priors, row_to_game(row), tau=TRAINING_TAU, engine=engine, sigma=sigma)
         if checkpoint is not None and count % CHECKPOINT_EVERY == 0:
             checkpoint(priors, count)
     return priors
 
 
-def run_training(csv_path, out_path, before, years=3, engine: str = DEFAULT_ENGINE) -> dict:
-    """Train from flat defaults on the games before `before` (and within `years` of it) into `out_path`."""
-    out_path = Path(out_path)
-    if any(out_path.resolve() == p.resolve() for p in PROTECTED):
-        raise PermissionError(f"refusing to overwrite {out_path.name}; train into a new file")
-
-    start = time.perf_counter()
+def load_training_rows(csv_path, before, years=3) -> dict:
+    """The training rows (oldest first) and their teams: {"rows", "team_ids", "games", "first", "last"}."""
     cleaned = clean_data_frame(create_data_frame(csv_path), before=before, years=years)
     four_factors = get_four_factors(cleaned)
     if four_factors.empty:
         raise ValueError(f"no games in the window before {before}")
-    first, last = str(cleaned["gameDateTimeEst"].min())[:10], str(cleaned["gameDateTimeEst"].max())[:10]
     team_ids = sorted({team_key(t) for t in four_factors["teamId"]} | {team_key(t) for t in four_factors["opponentTeamId"]})
+    return {"rows": four_factors, "team_ids": team_ids, "games": four_factors["gameId"].nunique(),
+            "first": str(cleaned["gameDateTimeEst"].min())[:10], "last": str(cleaned["gameDateTimeEst"].max())[:10]}
+
+
+def check_output(path, overwrite=False):
+    path = Path(path)
+    if any(path.resolve() == p.resolve() for p in PROTECTED):
+        raise PermissionError(f"refusing to overwrite {path.name}; train into a new file")
+    if path.exists() and not overwrite:
+        raise FileExistsError(f"{path.name} already exists; pick a new file or pass --overwrite")
+
+
+def run_training(csv_path, out_path, before, years=3, engine: str = DEFAULT_ENGINE,
+                 sigma_update: str = params.DEFAULT_UPDATE_SIGMA_MODE, overwrite: bool = False) -> dict:
+    """Train from flat defaults on the games before `before` (and within `years` of it) into `out_path`."""
+    out_path = Path(out_path)
+    check_output(out_path, overwrite)
+    sigma = params.update_sigma(sigma_update)
+
+    start = time.perf_counter()
+    data = load_training_rows(csv_path, before, years)
+    four_factors, team_ids, first, last = data["rows"], data["team_ids"], data["first"], data["last"]
     priors = default_priors(team_ids)
     loaded = time.perf_counter()
 
@@ -95,40 +115,51 @@ def run_training(csv_path, out_path, before, years=3, engine: str = DEFAULT_ENGI
         write_priors(out_path, p)
         print(f"Checkpoint: saved row {count}...")
 
-    train(four_factors, priors, engine, checkpoint if engine == "pymc" else None)
+    train(four_factors, priors, engine, checkpoint if engine == "pymc" else None, sigma=sigma)
     write_priors(out_path, priors)
     done = time.perf_counter()
 
-    summary ={"rows": len(four_factors), "games": four_factors["gameId"].nunique(), "teams": len(team_ids),
+    summary = {"rows": len(four_factors), "games": data["games"], "teams": len(team_ids),
                "first": first, "last": last, "load_seconds": loaded - start, "train_seconds": done - loaded}
     print(f"Trained {summary['rows']} rows ({summary['games']} games, {summary['teams']} teams, "
-          f"{first} to {last}) with the {engine} engine in {summary['train_seconds']:.1f} s "
+          f"{first} to {last}) with the {engine} engine, {sigma_update} sigma "
+          f"({', '.join(f'{f} {v:.4f}' for f, v in sigma.items())}) in {summary['train_seconds']:.1f} s "
           f"(+ {summary['load_seconds']:.1f} s loading the CSV) -> {out_path.name}")
     return summary
 
 
-def main(argv=None):
+def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Train priors on the Kaggle history into a new file.")
     parser.add_argument("--out", required=True, help="new priors file to write")
     parser.add_argument("--before", required=True, metavar="YYYY-MM-DD",
-                        help="only games before this date (e.g. 2026-27 opening night, 2026-10-20)")
+                        help=f"only games before this date (use {TRAINING_CUTOFF}, the start of the 2026-27 preseason)")
     parser.add_argument("--years", type=int, default=3, help="window length before --before (default 3)")
     parser.add_argument("--all-history", action="store_true", help="use every game before --before")
     parser.add_argument("--engine", choices=ENGINES, default=DEFAULT_ENGINE, help=f"default {DEFAULT_ENGINE}")
+    parser.add_argument("--sigma-update", choices=params.SIGMA_MODES, default=params.DEFAULT_UPDATE_SIGMA_MODE,
+                        help="game noise in the update: fitted (model_params.json) or legacy (0.05 for every "
+                             f"factor); default {params.DEFAULT_UPDATE_SIGMA_MODE}. (Training never simulates.)")
+    parser.add_argument("--overwrite", action="store_true", help="allow replacing an existing --out file")
     parser.add_argument("--csv", default=str(DEFAULT_CSV), help="Kaggle TeamStatisticsExtended.csv")
+    return parser
+
+
+def main(argv=None):
+    parser = make_parser()
     args = parser.parse_args(argv)
 
     try:
         before = date.fromisoformat(args.before).isoformat()
     except ValueError:
-        parser.error("--before must be a date like 2026-10-20")
+        parser.error(f"--before must be a date like {TRAINING_CUTOFF}")
     if args.years <= 0:
         parser.error("--years must be a positive integer")
     if not Path(args.csv).exists():
         parser.error(f"{args.csv} not found (download the Kaggle CSV into stats/)")
     try:
-        run_training(args.csv, args.out, before, years=None if args.all_history else args.years, engine=args.engine)
-    except PermissionError as err:
+        run_training(args.csv, args.out, before, years=None if args.all_history else args.years, engine=args.engine,
+                     sigma_update=args.sigma_update, overwrite=args.overwrite)
+    except (PermissionError, FileExistsError) as err:
         parser.error(str(err))
 
 

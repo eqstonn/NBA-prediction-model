@@ -56,12 +56,13 @@ def test_brier_hand_computed_on_3_game_toy_log(tmp_path):
     # same thing in the home-win form: p_home = 0.70, 0.40, 0.55, home won every game
     assert m["brier"] == pytest.approx(((0.70 - 1) ** 2 + (0.40 - 1) ** 2 + (0.55 - 1) ** 2) / 3, abs=1e-12)
     assert m["accuracy"] == pytest.approx(2 / 3)
+    assert m["confidence"] == pytest.approx((0.70 + 0.60 + 0.55) / 3)
     assert m["spread_mae"] == pytest.approx((5 + 6 + 8) / 3)
     assert m["games"] == 3
 
 
 def test_metrics_of_empty_log():
-    assert predlog.metrics([]) == {"games": 0, "accuracy": None, "spread_mae": None, "brier": None}
+    assert predlog.metrics([]) == {"games": 0, "accuracy": None, "confidence": None, "spread_mae": None, "brier": None}
 
 
 def test_append_rows_never_duplicates(tmp_path):
@@ -93,10 +94,10 @@ def test_update_logs_each_game_before_it_is_applied(env, monkeypatch):
     calls = []
     real_predict = update.predict_game
 
-    def spy(home_id, away_id, priors, seed=None):
+    def spy(home_id, away_id, priors, seed=None, sigma=None):
         on_disk = json.loads(update.PRIORS_PATH.read_text(encoding="utf-8"))
         calls.append({"same_as_saved": priors == on_disk, "applied": set(env.applied()), "seed": seed})
-        return real_predict(home_id, away_id, priors, seed=seed)
+        return real_predict(home_id, away_id, priors, seed=seed, sigma=sigma)
 
     monkeypatch.setattr(update, "predict_game", spy)
     update.run_update()
@@ -217,9 +218,20 @@ def test_replay_twice_gives_identical_files_and_no_duplicate_rows(env, tmp_path)
     args, out, log = replay_args(tmp_path)
     update.main(args)
     first = (out.read_bytes(), log.read_bytes())
-    update.main(args)
+    update.main(args + ["--overwrite"])
     assert (out.read_bytes(), log.read_bytes()) == first
     assert [r["game_id"] for r in predlog.read_log(log)] == EXPECTED
+
+
+@pytest.mark.parametrize("existing", ["out", "log"])
+def test_replay_never_overwrites_existing_results_without_flag(env, tmp_path, existing):
+    update.run_update()
+    args, out, log = replay_args(tmp_path)
+    target = out if existing == "out" else log
+    target.write_text("an earlier result", encoding="utf-8")
+    with pytest.raises(SystemExit):
+        update.main(args)
+    assert target.read_text(encoding="utf-8") == "an earlier result"
 
 
 def test_replay_needs_no_network(env, tmp_path, monkeypatch):

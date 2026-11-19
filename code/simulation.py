@@ -4,6 +4,8 @@
 import numpy as np
 import json
 
+import params
+
 def load_priors(file_path):
     with open(file_path, "r", encoding="utf-8") as file:
         data = json.load(file)
@@ -15,9 +17,12 @@ def get_teams():
     """
     pass
 
-def simulate_factors(team_a, team_b, data: dict, seed=None):
+def simulate_factors(team_a, team_b, data: dict, seed=None, sigma=None):
     n_sim = 10000
     rng = np.random.default_rng(seed)  # seed=None: fresh randomness (website); an int: reproducible (prediction log)
+    # game-to-game noise per factor. Default params.sim_sigma() = legacy (0.05 / 0.02 / 0.05 / 0.02):
+    # with the fitted sigma (model_params.json) these independent draws spread margins too wide.
+    sigma = params.check_sigma(sigma) if sigma is not None else params.sim_sigma()
 
     #find team a expected 4 factors in the game
     a_o_eFG = rng.normal(loc = data[team_a]["offense"]["eFG"]["mean"], scale = data[team_a]["offense"]["eFG"]["std"], size = n_sim)
@@ -30,10 +35,10 @@ def simulate_factors(team_a, team_b, data: dict, seed=None):
     b_d_ORB = rng.normal(loc = data[team_b]["defense"]["ORB"]["mean"], scale = data[team_b]["defense"]["ORB"]["std"], size = n_sim)
     b_d_FTR = rng.normal(loc = data[team_b]["defense"]["FTR"]["mean"], scale = data[team_b]["defense"]["FTR"]["std"], size = n_sim)
 
-    a_expected_eFG = rng.normal(loc = (a_o_eFG + b_d_eFG ) / 2, scale = 0.05, size = n_sim)
-    a_expected_TOV = rng.normal(loc = (a_o_TOV + b_d_TOV ) / 2, scale = 0.02, size = n_sim)
-    a_expected_ORB = rng.normal(loc = (a_o_ORB + b_d_ORB ) / 2, scale = 0.05, size = n_sim)
-    a_expected_FTR = rng.normal(loc = (a_o_FTR + b_d_FTR ) / 2, scale = 0.02, size = n_sim)
+    a_expected_eFG = rng.normal(loc = (a_o_eFG + b_d_eFG ) / 2, scale = sigma["eFG"], size = n_sim)
+    a_expected_TOV = rng.normal(loc = (a_o_TOV + b_d_TOV ) / 2, scale = sigma["TOV"], size = n_sim)
+    a_expected_ORB = rng.normal(loc = (a_o_ORB + b_d_ORB ) / 2, scale = sigma["ORB"], size = n_sim)
+    a_expected_FTR = rng.normal(loc = (a_o_FTR + b_d_FTR ) / 2, scale = sigma["FTR"], size = n_sim)
 
     #find team b expected 4 factors in the game
     b_o_eFG = rng.normal(loc = data[team_b]["offense"]["eFG"]["mean"], scale = data[team_b]["offense"]["eFG"]["std"], size = n_sim)
@@ -46,10 +51,10 @@ def simulate_factors(team_a, team_b, data: dict, seed=None):
     a_d_ORB = rng.normal(loc = data[team_a]["defense"]["ORB"]["mean"], scale = data[team_a]["defense"]["ORB"]["std"], size = n_sim)
     a_d_FTR = rng.normal(loc = data[team_a]["defense"]["FTR"]["mean"], scale = data[team_a]["defense"]["FTR"]["std"], size = n_sim)
 
-    b_expected_eFG = rng.normal(loc = (b_o_eFG + a_d_eFG ) / 2, scale = 0.05, size = n_sim)
-    b_expected_TOV = rng.normal(loc = (b_o_TOV + a_d_TOV ) / 2, scale = 0.02, size = n_sim)
-    b_expected_ORB = rng.normal(loc = (b_o_ORB + a_d_ORB ) / 2, scale = 0.05, size = n_sim)
-    b_expected_FTR = rng.normal(loc = (b_o_FTR + a_d_FTR ) / 2, scale = 0.02, size = n_sim)
+    b_expected_eFG = rng.normal(loc = (b_o_eFG + a_d_eFG ) / 2, scale = sigma["eFG"], size = n_sim)
+    b_expected_TOV = rng.normal(loc = (b_o_TOV + a_d_TOV ) / 2, scale = sigma["TOV"], size = n_sim)
+    b_expected_ORB = rng.normal(loc = (b_o_ORB + a_d_ORB ) / 2, scale = sigma["ORB"], size = n_sim)
+    b_expected_FTR = rng.normal(loc = (b_o_FTR + a_d_FTR ) / 2, scale = sigma["FTR"], size = n_sim)
     
     #formulas
     pace = 100 #average possesions of a nba team

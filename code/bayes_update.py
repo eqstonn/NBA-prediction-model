@@ -8,11 +8,15 @@ training data:
     game = {"team": "1610612765", "opponent": "1610612738",       # DET's offense vs BOS's defense
             "eFG": 0.541, "TOV": 0.168, "ORB": 0.354, "FTR": 0.372}
 
-For each factor the model is
+For each factor f the model is
     offense o ~ Normal(m_o, s_o^2),  defense d ~ Normal(m_d, s_d^2)
-    observed y ~ Normal((o + d) / 2, 0.05^2)
+    observed y ~ Normal((o + d) / 2, sigma_f^2)
 and the team's offense curve and the opponent's defense curve are replaced by their
 posterior mean/std. A full game is two calls, one per side.
+
+sigma_f is the game-to-game noise of factor f: by default the fitted values in
+model_params.json (params.update_sigma()); pass sigma=params.LEGACY_UPDATE_SIGMA (0.05 for
+every factor) for the pre-Phase-6 model. (The simulation's noise is set separately.)
 
 Two engines compute that posterior:
   "exact" (default)  the closed-form conjugate (Kalman) update below: exact, instant, no noise
@@ -29,8 +33,9 @@ _flags = os.environ.get("PYTENSOR_FLAGS", "")
 if "cxx=" not in _flags:
     os.environ["PYTENSOR_FLAGS"] = f"{_flags},cxx=" if _flags else "cxx="
 
-FACTORS = ("eFG", "TOV", "ORB", "FTR")
-OBS_SIGMA = 0.05
+import params  # noqa: E402
+
+FACTORS = params.FACTORS
 ENGINES = ("exact", "pymc")
 DEFAULT_ENGINE = "exact"
 
@@ -46,10 +51,16 @@ def _pymc():
     return pymc
 
 
-def _fit_exact(prior: dict, observed: dict) -> dict:
+def predictive(prior: dict, f: str, sigma: dict):
+    """(mean, variance) of factor f's observation before the game: ((m_o + m_d)/2, (s_o^2 + s_d^2)/4 + sigma_f^2)."""
+    (m_o, s_o), (m_d, s_d) = prior["o"][f], prior["d"][f]
+    return (m_o + m_d) / 2, (s_o ** 2 + s_d ** 2) / 4 + sigma[f] ** 2
+
+
+def _fit_exact(prior: dict, observed: dict, sigma: dict) -> dict:
     """
     Closed-form posterior of the model above, per factor:
-        V        = (s_o^2 + s_d^2) / 4 + 0.05^2       variance of the observation before the game
+        V        = (s_o^2 + s_d^2) / 4 + sigma_f^2    variance of the observation before the game
         surprise = y - (m_o + m_d) / 2
         m_o'     = m_o + (s_o^2 / 2) / V * surprise
         s_o'     = sqrt(s_o^2 - (s_o^2 / 2)^2 / V)
@@ -58,7 +69,7 @@ def _fit_exact(prior: dict, observed: dict) -> dict:
     out = {"o": {}, "d": {}}
     for f in FACTORS:
         (m_o, s_o), (m_d, s_d) = prior["o"][f], prior["d"][f]
-        v = (s_o ** 2 + s_d ** 2) / 4 + OBS_SIGMA ** 2
+        v = (s_o ** 2 + s_d ** 2) / 4 + sigma[f] ** 2
         surprise = observed[f] - (m_o + m_d) / 2
         for side, m, s in (("o", m_o, s_o), ("d", m_d, s_d)):
             covariance = s ** 2 / 2   # between this curve and the observation
@@ -66,8 +77,8 @@ def _fit_exact(prior: dict, observed: dict) -> dict:
     return out
 
 
-def _fit_pymc(prior: dict, observed: dict, random_seed=None) -> dict:
-    """The PyMC model (unchanged from the original dynamic_model.py), sampled with NUTS."""
+def _fit_pymc(prior: dict, observed: dict, random_seed, sigma: dict) -> dict:
+    """The PyMC model (as in the original dynamic_model.py, with per-factor sigma), sampled with NUTS."""
     pm = _pymc()
     with pm.Model():
         # current baseline offensively, then defensively
@@ -77,7 +88,7 @@ def _fit_pymc(prior: dict, observed: dict, random_seed=None) -> dict:
         # account for strength of schedule, then give the model the evidence
         for f in FACTORS:
             expected = (o_skill[f] + d_skill[f]) / 2
-            pm.Normal(f"{f}_evidence", mu=expected, sigma=OBS_SIGMA, observed=observed[f])
+            pm.Normal(f"{f}_evidence", mu=expected, sigma=sigma[f], observed=observed[f])
 
         # simulate to find the new baseline (new bell curve)
         trace = pm.sample(1000, progressbar=False, cores=1, random_seed=random_seed)
@@ -88,27 +99,30 @@ def _fit_pymc(prior: dict, observed: dict, random_seed=None) -> dict:
             for side in ("o", "d")}
 
 
-def _fit(prior: dict, observed: dict, random_seed=None, engine: str = DEFAULT_ENGINE) -> dict:
+def _fit(prior: dict, observed: dict, random_seed=None, engine: str = DEFAULT_ENGINE, sigma=None) -> dict:
     """
     prior    = {"o": {factor: (mean, std)}, "d": {factor: (mean, std)}}
     observed = {factor: value}
+    sigma    = {factor: game noise}; None = params.update_sigma() (fitted)
     returns    {"o": {factor: (mean, std)}, "d": {factor: (mean, std)}} of the posterior
     """
+    sigma = params.check_sigma(sigma) if sigma is not None else params.update_sigma()
     if engine == "exact":
-        return _fit_exact(prior, observed)
+        return _fit_exact(prior, observed, sigma)
     if engine == "pymc":
-        return _fit_pymc(prior, observed, random_seed)
+        return _fit_pymc(prior, observed, random_seed, sigma)
     raise ValueError(f"unknown engine {engine!r}; use one of {ENGINES}")
 
 
-def update_game(priors: dict, game: dict, tau: float = 0.0, random_seed=None, engine: str = DEFAULT_ENGINE) -> dict:
+def update_game(priors: dict, game: dict, tau: float = 0.0, random_seed=None, engine: str = DEFAULT_ENGINE,
+                sigma=None) -> dict:
     """
     Update `priors` in place from one team's offensive line in one game; returns `priors`.
 
     tau > 0 widens the curves in this fit (team offense, opponent defense) to
     sqrt(std^2 + tau^2) before fitting. Over a full game (one call per side) that widens
     each of the two teams' 8 curves exactly once. tau = 0 is the training update.
-    random_seed only matters for the pymc engine.
+    random_seed only matters for the pymc engine. sigma: {factor: noise}, default fitted.
     """
     team, opponent = str(game["team"]), str(game["opponent"])
     offense = priors[team]["offense"]
@@ -118,7 +132,7 @@ def update_game(priors: dict, game: dict, tau: float = 0.0, random_seed=None, en
         "o": {f: (offense[f]["mean"], widen(offense[f]["std"], tau) if tau else offense[f]["std"]) for f in FACTORS},
         "d": {f: (defense[f]["mean"], widen(defense[f]["std"], tau) if tau else defense[f]["std"]) for f in FACTORS},
     }
-    posterior = _fit(prior, {f: game[f] for f in FACTORS}, random_seed, engine=engine)
+    posterior = _fit(prior, {f: game[f] for f in FACTORS}, random_seed, engine=engine, sigma=sigma)
 
     # only written once the fit succeeded, so a failed fit leaves priors untouched
     for f in FACTORS:

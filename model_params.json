@@ -1,0 +1,39 @@
+{
+    "sigma": {
+        "eFG": 0.0637,
+        "TOV": 0.0364,
+        "ORB": 0.0719,
+        "FTR": 0.0854
+    },
+    "sigma_fit": {
+        "method": "per-factor maximum of the one-step-ahead (prequential) predictive log-likelihood of the exact training update (flat start, tau=0); grid 0.005-0.200 step 0.005, then +-0.005 around the best in steps of 0.0001",
+        "data": {
+            "csv": "TeamStatisticsExtended.csv",
+            "before": "2026-10-03",
+            "years": 3,
+            "rows": 7926,
+            "games": 3963,
+            "first": "2023-10-24",
+            "last": "2026-06-13"
+        },
+        "log_likelihood": {
+            "eFG": 10483.65,
+            "TOV": 14887.2,
+            "ORB": 9513.89,
+            "FTR": 8138.71
+        },
+        "log_likelihood_at_0.05": {
+            "eFG": 9940.26,
+            "TOV": 14238.52,
+            "ORB": 8178.98,
+            "FTR": 4812.55
+        },
+        "mean_squared_standardized_residual": {
+            "eFG": 0.9948,
+            "TOV": 0.9928,
+            "ORB": 0.9993,
+            "FTR": 1.0049
+        },
+        "fitted": "2026-11-18"
+    }
+}

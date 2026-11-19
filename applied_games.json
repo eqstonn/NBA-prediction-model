@@ -4,1469 +4,1889 @@
         "matchup": "BOS @ DET",
         "score": "113-121",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600002": {
         "date": "2026-10-20",
         "matchup": "PHI @ NYK",
         "score": "106-100",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600003": {
         "date": "2026-10-20",
         "matchup": "OKC @ SAS",
         "score": "116-104",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600004": {
         "date": "2026-10-21",
         "matchup": "MIN @ MIA",
         "score": "131-106",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600005": {
         "date": "2026-10-21",
         "matchup": "GSW @ LAL",
         "score": "105-127",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600085": {
         "date": "2026-10-21",
         "matchup": "ATL @ ORL",
         "score": "132-125",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600086": {
         "date": "2026-10-21",
         "matchup": "MIL @ WAS",
         "score": "116-128",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600087": {
         "date": "2026-10-21",
         "matchup": "CHA @ BKN",
         "score": "110-103",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600088": {
         "date": "2026-10-21",
         "matchup": "CHI @ TOR",
         "score": "92-135",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600089": {
         "date": "2026-10-21",
         "matchup": "UTA @ MEM",
         "score": "103-123",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600090": {
         "date": "2026-10-21",
         "matchup": "IND @ NOP",
         "score": "123-120",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600091": {
         "date": "2026-10-21",
         "matchup": "DAL @ HOU",
         "score": "110-128",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600092": {
         "date": "2026-10-21",
         "matchup": "PHX @ POR",
         "score": "83-124",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600093": {
         "date": "2026-10-21",
         "matchup": "SAC @ LAC",
         "score": "96-121",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600006": {
         "date": "2026-10-22",
         "matchup": "CLE @ PHI",
         "score": "106-114",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600007": {
         "date": "2026-10-22",
         "matchup": "DEN @ OKC",
         "score": "84-96",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600008": {
         "date": "2026-10-23",
         "matchup": "NYK @ BOS",
         "score": "103-107",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600009": {
         "date": "2026-10-23",
         "matchup": "HOU @ SAS",
         "score": "114-110",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600094": {
         "date": "2026-10-23",
         "matchup": "ATL @ CHA",
         "score": "128-81",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600095": {
         "date": "2026-10-23",
         "matchup": "DAL @ IND",
         "score": "121-105",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600096": {
         "date": "2026-10-23",
         "matchup": "MIN @ ORL",
         "score": "115-93",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600097": {
         "date": "2026-10-23",
         "matchup": "TOR @ WAS",
         "score": "112-102",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600098": {
         "date": "2026-10-23",
         "matchup": "DET @ MIA",
         "score": "128-111",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600099": {
         "date": "2026-10-23",
         "matchup": "CHI @ MIL",
         "score": "132-125",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600100": {
         "date": "2026-10-23",
         "matchup": "NOP @ UTA",
         "score": "119-120",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600101": {
         "date": "2026-10-23",
         "matchup": "MEM @ GSW",
         "score": "111-108",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600102": {
         "date": "2026-10-23",
         "matchup": "LAC @ LAL",
         "score": "117-125",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600103": {
         "date": "2026-10-23",
         "matchup": "POR @ SAC",
         "score": "128-120",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600104": {
         "date": "2026-10-24",
         "matchup": "MIA @ CHA",
         "score": "110-115",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600105": {
         "date": "2026-10-24",
         "matchup": "BKN @ CLE",
         "score": "121-125",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600106": {
         "date": "2026-10-24",
         "matchup": "MIL @ PHI",
         "score": "116-127",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600107": {
         "date": "2026-10-24",
         "matchup": "HOU @ ATL",
         "score": "121-114",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600108": {
         "date": "2026-10-24",
         "matchup": "WAS @ CHI",
         "score": "124-120",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600109": {
         "date": "2026-10-24",
         "matchup": "SAS @ DAL",
         "score": "122-106",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600110": {
         "date": "2026-10-24",
         "matchup": "NOP @ DEN",
         "score": "135-141",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600111": {
         "date": "2026-10-24",
         "matchup": "GSW @ PHX",
         "score": "122-131",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600112": {
         "date": "2026-10-25",
         "matchup": "LAL @ UTA",
         "score": "132-123",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600113": {
         "date": "2026-10-25",
         "matchup": "IND @ BKN",
         "score": "136-109",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600114": {
         "date": "2026-10-25",
         "matchup": "ORL @ NYK",
         "score": "111-102",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600115": {
         "date": "2026-10-25",
         "matchup": "TOR @ MIN",
         "score": "94-117",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600116": {
         "date": "2026-10-25",
         "matchup": "LAC @ OKC",
         "score": "101-108",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600117": {
         "date": "2026-10-25",
         "matchup": "DET @ PHI",
         "score": "106-93",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600118": {
         "date": "2026-10-25",
         "matchup": "MEM @ SAC",
         "score": "123-112",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600119": {
         "date": "2026-10-26",
         "matchup": "WAS @ CHA",
         "score": "103-110",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600120": {
         "date": "2026-10-26",
         "matchup": "MIN @ CLE",
         "score": "125-127",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600121": {
         "date": "2026-10-26",
         "matchup": "CHI @ BOS",
         "score": "99-134",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600122": {
         "date": "2026-10-26",
         "matchup": "DAL @ MIA",
         "score": "113-109",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600123": {
         "date": "2026-10-26",
         "matchup": "IND @ MIL",
         "score": "102-110",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600124": {
         "date": "2026-10-26",
         "matchup": "PHX @ OKC",
         "score": "114-125",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600125": {
         "date": "2026-10-26",
         "matchup": "ATL @ HOU",
         "score": "110-120",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600126": {
         "date": "2026-10-26",
         "matchup": "MEM @ UTA",
         "score": "110-105",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600127": {
         "date": "2026-10-26",
         "matchup": "GSW @ DEN",
         "score": "134-114",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600128": {
         "date": "2026-10-27",
         "matchup": "BKN @ BOS",
         "score": "124-125",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600129": {
         "date": "2026-10-27",
         "matchup": "DET @ NYK",
         "score": "97-111",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600130": {
         "date": "2026-10-27",
         "matchup": "SAC @ SAS",
         "score": "103-130",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600131": {
         "date": "2026-10-27",
         "matchup": "POR @ LAL",
         "score": "136-129",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600132": {
         "date": "2026-10-28",
         "matchup": "MIA @ ATL",
         "score": "129-117",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600133": {
         "date": "2026-10-28",
         "matchup": "WAS @ CLE",
         "score": "111-121",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600134": {
         "date": "2026-10-28",
         "matchup": "CHA @ DET",
         "score": "89-97",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600135": {
         "date": "2026-10-28",
         "matchup": "PHI @ IND",
         "score": "114-109",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600136": {
         "date": "2026-10-28",
         "matchup": "ORL @ TOR",
         "score": "99-129",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600137": {
         "date": "2026-10-28",
         "matchup": "NYK @ CHI",
         "score": "133-127",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600138": {
         "date": "2026-10-28",
         "matchup": "HOU @ MIL",
         "score": "132-100",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600139": {
         "date": "2026-10-28",
         "matchup": "GSW @ MIN",
         "score": "119-114",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600140": {
         "date": "2026-10-28",
         "matchup": "DEN @ NOP",
         "score": "104-91",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600141": {
         "date": "2026-10-28",
         "matchup": "SAS @ UTA",
         "score": "117-111",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600142": {
         "date": "2026-10-28",
         "matchup": "OKC @ DAL",
         "score": "96-120",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600143": {
         "date": "2026-10-28",
         "matchup": "LAL @ LAC",
         "score": "103-87",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600144": {
         "date": "2026-10-29",
         "matchup": "CLE @ ATL",
         "score": "111-114",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600145": {
         "date": "2026-10-29",
         "matchup": "SAC @ NOP",
         "score": "120-132",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600146": {
         "date": "2026-10-29",
         "matchup": "MEM @ POR",
         "score": "124-103",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600015": {
         "date": "2026-10-30",
         "matchup": "CHA @ WAS",
         "score": "79-95",
         "nba_cup": true,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600016": {
         "date": "2026-10-30",
         "matchup": "CHI @ BOS",
         "score": "111-125",
         "nba_cup": true,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600017": {
         "date": "2026-10-30",
         "matchup": "DET @ BKN",
         "score": "110-94",
         "nba_cup": true,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600018": {
         "date": "2026-10-30",
         "matchup": "NYK @ PHI",
         "score": "93-98",
         "nba_cup": true,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600019": {
         "date": "2026-10-30",
         "matchup": "ORL @ TOR",
         "score": "121-114",
         "nba_cup": true,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600020": {
         "date": "2026-10-30",
         "matchup": "IND @ MIA",
         "score": "125-145",
         "nba_cup": true,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600021": {
         "date": "2026-10-30",
         "matchup": "HOU @ DAL",
         "score": "111-116",
         "nba_cup": true,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600022": {
         "date": "2026-10-30",
         "matchup": "LAC @ MIN",
         "score": "101-127",
         "nba_cup": true,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600023": {
         "date": "2026-10-30",
         "matchup": "LAL @ GSW",
         "score": "95-112",
         "nba_cup": true,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600024": {
         "date": "2026-10-30",
         "matchup": "DEN @ PHX",
         "score": "127-120",
         "nba_cup": true,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600147": {
         "date": "2026-10-31",
         "matchup": "POR @ UTA",
         "score": "112-90",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600148": {
         "date": "2026-10-31",
         "matchup": "PHI @ CHA",
         "score": "109-104",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600149": {
         "date": "2026-10-31",
         "matchup": "ATL @ NOP",
         "score": "99-121",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600150": {
         "date": "2026-10-31",
         "matchup": "SAC @ MEM",
         "score": "105-136",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600151": {
         "date": "2026-10-31",
         "matchup": "CLE @ MIL",
         "score": "136-111",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600152": {
         "date": "2026-10-31",
         "matchup": "MIN @ SAS",
         "score": "111-121",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600153": {
         "date": "2026-10-31",
         "matchup": "OKC @ HOU",
         "score": "98-119",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600154": {
         "date": "2026-11-01",
         "matchup": "BOS @ ORL",
         "score": "108-97",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600155": {
         "date": "2026-11-01",
         "matchup": "BKN @ IND",
         "score": "98-90",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600156": {
         "date": "2026-11-01",
         "matchup": "LAC @ GSW",
         "score": "112-124",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600157": {
         "date": "2026-11-01",
         "matchup": "TOR @ LAL",
         "score": "125-131",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600158": {
         "date": "2026-11-02",
         "matchup": "OKC @ CLE",
         "score": "117-112",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600159": {
         "date": "2026-11-02",
         "matchup": "DET @ CHA",
         "score": "124-91",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600160": {
         "date": "2026-11-02",
         "matchup": "ATL @ IND",
         "score": "108-104",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600161": {
         "date": "2026-11-02",
         "matchup": "BKN @ NYK",
         "score": "90-103",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600162": {
         "date": "2026-11-02",
         "matchup": "WAS @ ORL",
         "score": "103-94",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600163": {
         "date": "2026-11-02",
         "matchup": "CHI @ PHI",
         "score": "107-126",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600164": {
         "date": "2026-11-02",
         "matchup": "SAC @ DAL",
         "score": "115-100",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600165": {
         "date": "2026-11-02",
         "matchup": "NOP @ MEM",
         "score": "135-134",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600166": {
         "date": "2026-11-02",
         "matchup": "MIL @ MIN",
         "score": "100-112",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600167": {
         "date": "2026-11-02",
         "matchup": "BOS @ HOU",
         "score": "93-109",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600168": {
         "date": "2026-11-02",
         "matchup": "UTA @ SAS",
         "score": "97-119",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600169": {
         "date": "2026-11-02",
         "matchup": "POR @ DEN",
         "score": "118-110",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600170": {
         "date": "2026-11-02",
         "matchup": "PHX @ GSW",
         "score": "113-116",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600171": {
         "date": "2026-11-02",
         "matchup": "TOR @ LAC",
         "score": "125-118",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600172": {
         "date": "2026-11-02",
         "matchup": "MIA @ LAL",
         "score": "117-138",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600173": {
         "date": "2026-11-04",
         "matchup": "PHI @ DET",
         "score": "112-106",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600174": {
         "date": "2026-11-04",
         "matchup": "ATL @ WAS",
         "score": "120-105",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600175": {
         "date": "2026-11-04",
         "matchup": "MIL @ BOS",
         "score": "102-109",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600176": {
         "date": "2026-11-04",
         "matchup": "CHA @ BKN",
         "score": "104-114",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600177": {
         "date": "2026-11-04",
         "matchup": "CHI @ NYK",
         "score": "105-135",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600178": {
         "date": "2026-11-04",
         "matchup": "IND @ MEM",
         "score": "107-103",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600179": {
         "date": "2026-11-04",
         "matchup": "UTA @ NOP",
         "score": "113-120",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600180": {
         "date": "2026-11-04",
         "matchup": "CLE @ OKC",
         "score": "116-124",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600181": {
         "date": "2026-11-04",
         "matchup": "MIN @ HOU",
         "score": "117-107",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600182": {
         "date": "2026-11-04",
         "matchup": "TOR @ DEN",
         "score": "109-128",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600183": {
         "date": "2026-11-04",
         "matchup": "POR @ PHX",
         "score": "132-119",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600184": {
         "date": "2026-11-04",
         "matchup": "DAL @ SAS",
         "score": "111-112",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600185": {
         "date": "2026-11-04",
         "matchup": "LAL @ SAC",
         "score": "116-103",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600186": {
         "date": "2026-11-04",
         "matchup": "MIA @ LAC",
         "score": "117-116",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600187": {
         "date": "2026-11-05",
         "matchup": "ORL @ PHX",
         "score": "104-117",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600188": {
         "date": "2026-11-05",
         "matchup": "MIA @ GSW",
         "score": "100-120",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600025": {
         "date": "2026-11-06",
         "matchup": "WAS @ ATL",
         "score": "132-139",
         "nba_cup": true,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600026": {
         "date": "2026-11-06",
         "matchup": "BOS @ CHA",
         "score": "119-80",
         "nba_cup": true,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600027": {
         "date": "2026-11-06",
         "matchup": "PHI @ CLE",
         "score": "95-119",
         "nba_cup": true,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600028": {
         "date": "2026-11-06",
         "matchup": "UTA @ DAL",
         "score": "100-112",
         "nba_cup": true,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600029": {
         "date": "2026-11-06",
         "matchup": "OKC @ MEM",
         "score": "128-97",
         "nba_cup": true,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600030": {
         "date": "2026-11-06",
         "matchup": "TOR @ MIL",
         "score": "121-107",
         "nba_cup": true,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600031": {
         "date": "2026-11-06",
         "matchup": "MIN @ NOP",
         "score": "115-109",
         "nba_cup": true,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600032": {
         "date": "2026-11-06",
         "matchup": "POR @ LAL",
         "score": "118-124",
         "nba_cup": true,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600033": {
         "date": "2026-11-06",
         "matchup": "SAS @ SAC",
         "score": "124-109",
         "nba_cup": true,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600189": {
         "date": "2026-11-07",
         "matchup": "DEN @ IND",
         "score": "114-102",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600190": {
         "date": "2026-11-07",
         "matchup": "BKN @ ATL",
         "score": "121-124",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600191": {
         "date": "2026-11-07",
         "matchup": "NYK @ CLE",
         "score": "109-97",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600192": {
         "date": "2026-11-07",
         "matchup": "WAS @ OKC",
         "score": "75-114",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600193": {
         "date": "2026-11-07",
         "matchup": "ORL @ GSW",
         "score": "119-126",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600194": {
         "date": "2026-11-07",
         "matchup": "HOU @ PHX",
         "score": "99-102",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600195": {
         "date": "2026-11-07",
         "matchup": "SAS @ POR",
         "score": "125-103",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600196": {
         "date": "2026-11-08",
         "matchup": "PHI @ CHI",
         "score": "127-121",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600197": {
         "date": "2026-11-08",
         "matchup": "LAL @ DET",
         "score": "121-116",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600198": {
         "date": "2026-11-08",
         "matchup": "UTA @ MIN",
         "score": "100-115",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600199": {
         "date": "2026-11-08",
         "matchup": "BKN @ DAL",
         "score": "93-130",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600200": {
         "date": "2026-11-08",
         "matchup": "BOS @ MIL",
         "score": "117-97",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600201": {
         "date": "2026-11-08",
         "matchup": "NOP @ LAC",
         "score": "123-139",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600202": {
         "date": "2026-11-08",
         "matchup": "MIA @ SAC",
         "score": "114-108",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600203": {
         "date": "2026-11-09",
         "matchup": "LAL @ ATL",
         "score": "124-114",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600204": {
         "date": "2026-11-09",
         "matchup": "CLE @ CHA",
         "score": "112-124",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600205": {
         "date": "2026-11-09",
         "matchup": "WAS @ DET",
         "score": "111-122",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600206": {
         "date": "2026-11-09",
         "matchup": "MEM @ TOR",
         "score": "118-102",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600207": {
         "date": "2026-11-09",
         "matchup": "IND @ DAL",
         "score": "122-125",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600208": {
         "date": "2026-11-09",
         "matchup": "DEN @ HOU",
         "score": "100-110",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600209": {
         "date": "2026-11-09",
         "matchup": "SAS @ PHX",
         "score": "122-96",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600210": {
         "date": "2026-11-09",
         "matchup": "NOP @ GSW",
         "score": "87-138",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600211": {
         "date": "2026-11-10",
         "matchup": "MIL @ NYK",
         "score": "85-117",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600212": {
         "date": "2026-11-10",
         "matchup": "BOS @ PHI",
         "score": "123-101",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600213": {
         "date": "2026-11-10",
         "matchup": "LAC @ PHX",
         "score": "110-133",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600214": {
         "date": "2026-11-10",
         "matchup": "MIA @ UTA",
         "score": "115-109",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600215": {
         "date": "2026-11-10",
         "matchup": "ORL @ SAC",
         "score": "107-100",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600216": {
         "date": "2026-11-10",
         "matchup": "OKC @ POR",
         "score": "103-123",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600217": {
         "date": "2026-11-11",
         "matchup": "WAS @ IND",
         "score": "101-114",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600218": {
         "date": "2026-11-11",
         "matchup": "CLE @ NYK",
         "score": "115-107",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600219": {
         "date": "2026-11-11",
         "matchup": "BOS @ TOR",
         "score": "98-93",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600220": {
         "date": "2026-11-11",
         "matchup": "SAS @ CHI",
         "score": "124-119",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600221": {
         "date": "2026-11-11",
         "matchup": "DEN @ MEM",
         "score": "123-118",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600222": {
         "date": "2026-11-11",
         "matchup": "LAL @ MIL",
         "score": "123-112",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600223": {
         "date": "2026-11-11",
         "matchup": "BKN @ NOP",
         "score": "145-111",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600224": {
         "date": "2026-11-11",
         "matchup": "ORL @ UTA",
         "score": "123-108",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600225": {
         "date": "2026-11-11",
         "matchup": "GSW @ HOU",
         "score": "108-115",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600226": {
         "date": "2026-11-11",
         "matchup": "OKC @ POR",
         "score": "108-118",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600227": {
         "date": "2026-11-12",
         "matchup": "TOR @ PHI",
         "score": "112-123",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600228": {
         "date": "2026-11-12",
         "matchup": "DET @ WAS",
         "score": "144-140",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600229": {
         "date": "2026-11-12",
         "matchup": "DAL @ MIN",
         "score": "94-133",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600230": {
         "date": "2026-11-12",
         "matchup": "CHA @ PHX",
         "score": "96-101",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600034": {
         "date": "2026-11-13",
         "matchup": "NYK @ IND",
         "score": "104-106",
         "nba_cup": true,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600035": {
         "date": "2026-11-13",
         "matchup": "MIL @ ORL",
         "score": "99-107",
         "nba_cup": true,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600036": {
         "date": "2026-11-13",
         "matchup": "CLE @ MIA",
         "score": "121-133",
         "nba_cup": true,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600037": {
         "date": "2026-11-13",
         "matchup": "ATL @ CHI",
         "score": "117-125",
         "nba_cup": true,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600038": {
         "date": "2026-11-13",
         "matchup": "MEM @ NOP",
         "score": "142-111",
         "nba_cup": true,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600039": {
         "date": "2026-11-13",
         "matchup": "UTA @ HOU",
         "score": "118-125",
         "nba_cup": true,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600040": {
         "date": "2026-11-13",
         "matchup": "GSW @ SAS",
         "score": "85-123",
         "nba_cup": true,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600041": {
         "date": "2026-11-13",
         "matchup": "POR @ SAC",
         "score": "120-107",
         "nba_cup": true,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600042": {
         "date": "2026-11-13",
         "matchup": "OKC @ LAC",
         "score": "112-113",
         "nba_cup": true,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600231": {
         "date": "2026-11-14",
         "matchup": "DEN @ NOP",
         "score": "116-108",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600232": {
         "date": "2026-11-14",
         "matchup": "DAL @ CLE",
         "score": "117-127",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600233": {
         "date": "2026-11-14",
         "matchup": "DET @ MIA",
         "score": "117-137",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600234": {
         "date": "2026-11-14",
         "matchup": "BKN @ MEM",
         "score": "110-129",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600235": {
         "date": "2026-11-14",
         "matchup": "CHI @ MIN",
         "score": "117-106",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600236": {
         "date": "2026-11-15",
         "matchup": "IND @ PHI",
         "score": "124-131",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600237": {
         "date": "2026-11-15",
         "matchup": "LAL @ PHX",
         "score": "131-123",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600238": {
         "date": "2026-11-15",
         "matchup": "CHA @ LAC",
         "score": "105-113",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600239": {
         "date": "2026-11-15",
         "matchup": "SAS @ UTA",
         "score": "110-102",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600240": {
         "date": "2026-11-15",
         "matchup": "DAL @ BOS",
         "score": "94-131",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600241": {
         "date": "2026-11-15",
         "matchup": "NYK @ TOR",
         "score": "112-108",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600242": {
         "date": "2026-11-15",
         "matchup": "HOU @ WAS",
         "score": "147-119",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600243": {
         "date": "2026-11-15",
         "matchup": "ATL @ MIL",
         "score": "113-106",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600244": {
         "date": "2026-11-15",
         "matchup": "OKC @ SAC",
         "score": "125-103",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600245": {
         "date": "2026-11-16",
         "matchup": "ORL @ BOS",
         "score": "115-105",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600246": {
         "date": "2026-11-16",
         "matchup": "CHI @ CLE",
         "score": "115-126",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600247": {
         "date": "2026-11-16",
         "matchup": "MEM @ WAS",
         "score": "136-120",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600248": {
         "date": "2026-11-16",
         "matchup": "PHI @ BKN",
         "score": "135-123",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600249": {
         "date": "2026-11-16",
         "matchup": "HOU @ MIA",
         "score": "110-128",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600250": {
         "date": "2026-11-16",
         "matchup": "POR @ MIN",
         "score": "98-106",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600251": {
         "date": "2026-11-16",
         "matchup": "GSW @ NOP",
         "score": "94-115",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600252": {
         "date": "2026-11-16",
         "matchup": "PHX @ DEN",
         "score": "117-105",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600253": {
         "date": "2026-11-17",
         "matchup": "NYK @ TOR",
         "score": "111-102",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600254": {
         "date": "2026-11-17",
         "matchup": "POR @ MIN",
         "score": "105-106",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600255": {
         "date": "2026-11-17",
         "matchup": "DET @ SAS",
         "score": "105-93",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600256": {
         "date": "2026-11-17",
         "matchup": "CHA @ LAL",
         "score": "114-118",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     },
     "0022600257": {
         "date": "2026-11-17",
         "matchup": "UTA @ LAC",
         "score": "132-107",
         "nba_cup": false,
-        "engine": "exact"
+        "engine": "exact",
+        "sigma_update": "fitted",
+        "sigma_sim": "legacy"
     }
 }

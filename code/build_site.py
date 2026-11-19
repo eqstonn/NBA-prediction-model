@@ -4,6 +4,7 @@ Build the predictions website for this week's NBA games.
     python code/build_site.py                 # today + next 6 days
     python code/build_site.py --start 2026-11-16 --days 7
     python code/build_site.py --priors other_priors.json
+    python code/build_site.py --sigma-sim fitted  # simulation game noise (default legacy, see params.py)
 
 Writes site/index.html (open it in a browser) and site/predictions.json.
 """
@@ -14,6 +15,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import params
 from predict import REPO_ROOT, load_model, predict_game
 from schedule import fetch_games
 
@@ -21,10 +23,11 @@ SITE_DIR = REPO_ROOT / "site"
 EASTERN = ZoneInfo("America/New_York")
 
 
-def build_predictions(games, model):
+def build_predictions(games, model, sim_sigma=None):
+    """sim_sigma: {factor: game noise} for the simulation; None = params.sim_sigma() (legacy by default)."""
     rows = []
     for g in games:
-        pred = predict_game(g["home"]["id"], g["away"]["id"], model)
+        pred = predict_game(g["home"]["id"], g["away"]["id"], model, sigma=sim_sigma)
         row = dict(g, prediction=pred)
         if pred:
             home_fav = pred["home_win_pct"] >= pred["away_win_pct"]
@@ -165,24 +168,30 @@ def render_page(rows, source, priors_path, start, end):
 """
 
 
-def main():
+def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--start", help="first day, YYYY-MM-DD (default: today, US Eastern)")
     parser.add_argument("--days", type=int, default=7, help="how many days to include (default 7)")
     parser.add_argument("--priors", help="model file to use (default: priors.json or $NBA_PRIORS)")
-    args = parser.parse_args()
+    parser.add_argument("--sigma-sim", choices=params.SIGMA_MODES, default=params.DEFAULT_SIM_SIGMA_MODE,
+                        help=f"simulation game noise (default {params.DEFAULT_SIM_SIGMA_MODE})")
+    return parser
+
+
+def main(argv=None):
+    args = make_parser().parse_args(argv)
 
     start = date.fromisoformat(args.start) if args.start else datetime.now(EASTERN).date()
     end = start + timedelta(days=args.days - 1)
 
     model, priors_path = load_model(args.priors)
     games, source = fetch_games(start, args.days)
-    rows = build_predictions(games, model)
+    rows = build_predictions(games, model, sim_sigma=params.sim_sigma(args.sigma_sim))
 
     SITE_DIR.mkdir(exist_ok=True)
     (SITE_DIR / "predictions.json").write_text(json.dumps(
         {"start": start.isoformat(), "end": end.isoformat(), "source": source,
-         "model": Path(priors_path).name, "games": rows}, indent=2), encoding="utf-8")
+         "model": Path(priors_path).name, "sigma_sim": args.sigma_sim, "games": rows}, indent=2), encoding="utf-8")
     (SITE_DIR / "index.html").write_text(render_page(rows, source, priors_path, start, end), encoding="utf-8")
     print(f"Wrote {len(rows)} games ({source}) to {SITE_DIR / 'index.html'}")
 

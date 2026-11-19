@@ -27,8 +27,11 @@ sys.path.insert(0, str(CODE_DIR))
 
 import bayes_update  # noqa: E402  (sets PYTENSOR_FLAGS; pymc is only imported for the pymc engine)
 import dynamic_model  # noqa: E402
+import params  # noqa: E402
 import update  # noqa: E402
 from state_manager import default_priors  # noqa: E402
+
+LEGACY = params.LEGACY_UPDATE_SIGMA   # sigma = 0.05 for every factor, the numbers the hand calculations use
 
 FROZEN = REPO_ROOT / "priors_pre_2026-27.json"
 GAMES = json.loads((REPO_ROOT / "tests" / "fixtures" / "games_2026-27_first5.json").read_text(encoding="utf-8"))
@@ -86,8 +89,10 @@ def test_exact_formula_hand_computed_one_game():
       surprise = 0.50 - 0.54 = -0.04 -> means 0.52 - 0.04 * 2/27 = 0.517037 and 0.557037, stds 0.019626
     """
     priors = toy_priors()
-    bayes_update.update_game(priors, {"team": "HOME", "opponent": "AWAY", **{f: 0.60 for f in FACTORS}}, engine="exact")
-    bayes_update.update_game(priors, {"team": "AWAY", "opponent": "HOME", **{f: 0.50 for f in FACTORS}}, engine="exact")
+    bayes_update.update_game(priors, {"team": "HOME", "opponent": "AWAY", **{f: 0.60 for f in FACTORS}},
+                             engine="exact", sigma=LEGACY)
+    bayes_update.update_game(priors, {"team": "AWAY", "opponent": "HOME", **{f: 0.50 for f in FACTORS}},
+                             engine="exact", sigma=LEGACY)
 
     for f in FACTORS:
         for (team, side), mean in {("HOME", "offense"): 0.505926, ("AWAY", "defense"): 0.545926,
@@ -112,7 +117,7 @@ def test_exact_formula_hand_computed_with_drift():
     """
     priors = toy_priors()
     bayes_update.update_game(priors, {"team": "HOME", "opponent": "AWAY", **{f: 0.60 for f in FACTORS}},
-                             tau=0.01, engine="exact")
+                             tau=0.01, engine="exact", sigma=LEGACY)
     for f in FACTORS:
         assert priors["HOME"]["offense"][f]["mean"] == pytest.approx(0.507273, abs=1e-6)
         assert priors["AWAY"]["defense"][f]["mean"] == pytest.approx(0.547273, abs=1e-6)
@@ -144,7 +149,8 @@ def test_exact_and_pymc_agree_on_real_games(season_priors):
     std_gap = max(abs(exact[t][s][f]["std"] - sampled[t][s][f]["std"]) for t, s, f in curves(played))
     moved = max(abs(exact[t][s][f]["mean"] - season_priors[t][s][f]["mean"]) for t, s, f in curves(played))
 
-    assert moved > 3 * MEAN_TOL, "the games should move some means well beyond the tolerance"
+    # (exact engine, so deterministic: 0.0074 with the fitted sigma, 0.0126 with sigma 0.05)
+    assert moved > 2 * MEAN_TOL, "the games should move some means well beyond the tolerance"
     assert mean_gap < MEAN_TOL, f"largest mean gap {mean_gap:.5f}"
     assert std_gap < STD_TOL, f"largest std gap {std_gap:.5f}"
     for team_id in season_priors:
@@ -184,7 +190,7 @@ def no_fit(monkeypatch):
     """Replace the fit with posterior = prior, so all that's left is the widening."""
     calls = []
 
-    def fake_fit(prior, observed, random_seed=None, engine=None):
+    def fake_fit(prior, observed, random_seed=None, engine=None, sigma=None):
         calls.append(prior)
         return prior
 
@@ -268,20 +274,32 @@ def test_winner_offense_improves(season_priors):
             assert priors[team_id] == before[team_id], team_id
 
 
-MAX_GAIN = 0.1   # a game may move a mean by at most 10% of its surprise
-
-
-def test_per_game_mean_shifts_damped(season_priors):
+def max_gain(sigma_f: float) -> float:
     """
-    The first 5 real games of 2026-27: every mean moves by at most 0.1 x |observed - expected|,
+    The largest share of a surprise one game can move a mean by, this season: a curve's std is
+    at most s0 = sqrt(season_std^2 + tau^2) (season start, widened), and the gain
+    (s_o^2/2) / ((s_o^2 + s_d^2)/4 + sigma^2) is largest when s_o = s0 and s_d -> 0.
+    sigma 0.05 -> 0.097 (the old "at most 10%" rule); fitted TOV 0.0364 -> 0.17, FTR 0.0854 -> 0.035.
+    """
+    s0_sq = update.season_std(update.DEFAULT_N) ** 2 + update.season_tau(update.DEFAULT_M) ** 2
+    return (s0_sq / 2) / (s0_sq / 4 + sigma_f ** 2)
+
+
+@pytest.mark.parametrize("mode", params.SIGMA_MODES)
+def test_per_game_mean_shifts_damped(season_priors, mode):
+    """
+    The first 5 real games of 2026-27: every mean moves by at most max_gain(sigma_f) x |observed - expected|,
     where expected = (offense + defense) / 2 from the curves before the game. Each fit moves
     the team's offense and the opponent's defense, both driven by the same surprise.
     """
+    sigma = params.update_sigma(mode)
+    if mode == "legacy":
+        assert all(max_gain(s) < 0.1 for s in sigma.values())   # the original "at most 10%" rule
     priors = season_priors
     too_big = []
     for game in GAMES:
         before = copy.deepcopy(priors)
-        update.apply_game(priors, game)
+        update.apply_game(priors, game, sigma=sigma)
         for side, other in (("home", "away"), ("away", "home")):
             team, opp = game[side], game[other]
             for f in FACTORS:
@@ -289,9 +307,9 @@ def test_per_game_mean_shifts_damped(season_priors):
                 surprise = team[f] - expected
                 for team_id, curve, who in ((team["id"], "offense", team["abbr"]), (opp["id"], "defense", opp["abbr"])):
                     shift = priors[team_id][curve][f]["mean"] - before[team_id][curve][f]["mean"]
-                    if abs(shift) > MAX_GAIN * abs(surprise):
+                    if abs(shift) > max_gain(sigma[f]) * abs(surprise) + 1e-12:
                         too_big.append(f"{game['date']} {who} {curve} {f}: shift {shift:+.4f}, surprise {surprise:+.4f}")
-    assert not too_big, "mean shifts above 0.1 x |observed - expected|:\n" + "\n".join(too_big)
+    assert not too_big, "mean shifts above max_gain x |observed - expected|:\n" + "\n".join(too_big)
 
 
 # ---------------------------------------------------------------------------

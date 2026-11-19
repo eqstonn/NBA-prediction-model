@@ -11,6 +11,7 @@ game_id: appending a game that is already in the file does nothing.
 Metrics
 -------
   winner accuracy   share of games where predicted_winner won
+  avg confidence    mean win_pct of the predicted winner; well calibrated when it matches the accuracy
   spread MAE        mean |(proj_home - proj_away) - (actual_home - actual_away)|, in points
   Brier score       mean (p - y)^2, p = win_pct / 100, y = 1 if predicted_winner won else 0
                     (identical to the home-win form; 0 is perfect, 0.25 is a coin flip)
@@ -75,8 +76,9 @@ def append_rows(path, rows) -> int:
 def metrics(rows) -> dict:
     """{"games", "accuracy", "spread_mae", "brier"} over the rows (None values when there are no rows)."""
     if not rows:
-        return {"games": 0, "accuracy": None, "spread_mae": None, "brier": None}
+        return {"games": 0, "accuracy": None, "confidence": None, "spread_mae": None, "brier": None}
     correct, spread_errors, brier = 0, [], []
+    confidence = 0.0
     for r in rows:
         actual_home, actual_away = int(r["actual_home"]), int(r["actual_away"])
         actual_winner = r["home"] if actual_home > actual_away else r["away"]
@@ -85,12 +87,14 @@ def metrics(rows) -> dict:
         projected = float(r["proj_home"]) - float(r["proj_away"])
         spread_errors.append(abs(projected - (actual_home - actual_away)))
         brier.append((float(r["win_pct"]) / 100 - hit) ** 2)
+        confidence += float(r["win_pct"]) / 100
     n = len(rows)
-    return {"games": n, "accuracy": correct / n, "spread_mae": sum(spread_errors) / n, "brier": sum(brier) / n}
+    return {"games": n, "accuracy": correct / n, "confidence": confidence / n,
+            "spread_mae": sum(spread_errors) / n, "brier": sum(brier) / n}
 
 
 def format_metrics(m: dict) -> str:
     if not m["games"]:
         return "no games in the log yet"
-    return (f"{m['games']} games: winner accuracy {m['accuracy']:.1%}, "
+    return (f"{m['games']} games: winner accuracy {m['accuracy']:.1%} (avg confidence {m['confidence']:.1%}), "
             f"spread MAE {m['spread_mae']:.2f} pts, Brier {m['brier']:.4f}")

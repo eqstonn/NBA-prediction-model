@@ -5,7 +5,8 @@ Side-by-side accuracy of two or more prediction logs (predlog.py format).
 
 Metrics are computed over the games that are in EVERY log, so each column is scored on
 the same games; how many games each log has in total is shown too. The best value in
-each row is marked with *.
+each row is marked with *. "avg confidence" (mean win % of the predicted winner) has no
+best: a model is well calibrated when it matches its winner accuracy.
 """
 import argparse
 import sys
@@ -13,8 +14,9 @@ from pathlib import Path
 
 import predlog
 
-ROWS = [  # (label, metric key, format, higher is better)
+ROWS = [  # (label, metric key, format, higher is better; None = no "best")
     ("winner accuracy", "accuracy", "{:.1%}", True),
+    ("avg confidence", "confidence", "{:.1%}", None),   # compare with the accuracy: calibration
     ("spread MAE (pts)", "spread_mae", "{:.2f}", False),
     ("Brier score", "brier", "{:.4f}", False),
 ]
@@ -34,7 +36,7 @@ def compare(paths) -> str:
     if common:
         for label, key, fmt, higher in ROWS:
             values = [results[name][key] for name in logs]
-            best = max(values) if higher else min(values)
+            best = None if higher is None else (max(values) if higher else min(values))
             cells = [fmt.format(v) + ("*" if v == best and len(set(values)) > 1 else " ") for v in values]
             lines.append(f"{label:<18}" + "".join(f"{c:>{width}}" for c in cells))
     else:

@@ -118,7 +118,7 @@ class FakeNBA:
         }}
 
 
-def fake_fit(prior, observed, random_seed=None, engine=None):
+def fake_fit(prior, observed, random_seed=None, engine=None, sigma=None):
     """Deterministic stand-in for the PyMC fit: means move 10% toward the observation."""
     return {side: {f: (prior[side][f][0] + 0.1 * (observed[f] - prior[side][f][0]), prior[side][f][1] * 0.99)
                    for f in FACTORS}
