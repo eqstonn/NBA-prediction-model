@@ -206,6 +206,36 @@ def check_output(path, overwrite=False):
         raise FileExistsError(f"{path.name} already exists; pick a new file or pass --overwrite")
 
 
+def train_priors(data: dict, engine: str = DEFAULT_ENGINE, sigma_update: str = params.DEFAULT_UPDATE_SIGMA_MODE,
+                 pace: str = params.DEFAULT_PACE_MODE, home: str = params.DEFAULT_HOME_MODE,
+                 rest: str = params.DEFAULT_REST_MODE, checkpoint=None) -> dict:
+    """
+    The training pass in memory (what run_training writes): flat start, every row of `data`
+    (load_training_rows) with tau = 0, plus paces / home boost / rest as switched. Returns
+    {"priors", "sides", "rest_rows", "pace_params", "effects"} (None for switches that are off).
+    """
+    sigma = params.update_sigma(sigma_update)
+    with_pace, with_home, with_rest = params.is_on(pace, "pace"), params.is_on(home, "home"), params.is_on(rest, "rest")
+    pace_params = params.pace_params() if with_pace else None
+    boost = params.home_boost() if with_home else None
+    effects = params.rest_effects() if with_rest else None
+    if with_pace and not data["possessions"]:
+        raise KeyError("--pace on needs a 'possessions' column in the training data")
+
+    priors = default_priors(data["team_ids"])
+    sides = row_sides(data) if with_home else None
+    offsets = row_offsets(sides, boost) if with_home else None
+    rest_rows = row_rest(data) if with_rest else None
+    if with_rest:
+        rest_shifts = row_rest_offsets(rest_rows, effects)
+        offsets = [params.combine_offsets(h, r) for h, r in zip(offsets or [None] * len(rest_shifts), rest_shifts)]
+    train(data["rows"], priors, engine, checkpoint, sigma=sigma, offsets=offsets)
+    if with_pace:
+        start_pace(priors, data["team_ids"], pace_params["start_mean"], pace_params["start_std"])
+        train_pace(data["possessions"], priors, pace_params["sigma"])
+    return {"priors": priors, "sides": sides, "rest_rows": rest_rows, "pace_params": pace_params, "effects": effects}
+
+
 def run_training(csv_path, out_path, before, years=3, engine: str = DEFAULT_ENGINE,
                  sigma_update: str = params.DEFAULT_UPDATE_SIGMA_MODE, overwrite: bool = False,
                  pace: str = params.DEFAULT_PACE_MODE, home: str = params.DEFAULT_HOME_MODE,
@@ -218,17 +248,11 @@ def run_training(csv_path, out_path, before, years=3, engine: str = DEFAULT_ENGI
     out_path = Path(out_path)
     check_output(out_path, overwrite)
     sigma = params.update_sigma(sigma_update)
-    with_pace = params.is_on(pace, "pace")
-    pace_params = params.pace_params() if with_pace else None
-    with_home = params.is_on(home, "home")
-    boost = params.home_boost() if with_home else None
-    with_rest = params.is_on(rest, "rest")
-    effects = params.rest_effects() if with_rest else None
+    with_pace, with_home, with_rest = params.is_on(pace, "pace"), params.is_on(home, "home"), params.is_on(rest, "rest")
 
     start = time.perf_counter()
     data = load_training_rows(csv_path, before, years)
     four_factors, team_ids, first, last = data["rows"], data["team_ids"], data["first"], data["last"]
-    priors = default_priors(team_ids)
     loaded = time.perf_counter()
 
     def checkpoint(p, count):
@@ -237,16 +261,10 @@ def run_training(csv_path, out_path, before, years=3, engine: str = DEFAULT_ENGI
 
     if with_pace and not data["possessions"]:
         raise KeyError(f"--pace on needs a 'possessions' column in {Path(csv_path).name}")
-    sides = row_sides(data) if with_home else None
-    offsets = row_offsets(sides, boost) if with_home else None
-    rest_rows = row_rest(data) if with_rest else None
-    if with_rest:
-        rest_shifts = row_rest_offsets(rest_rows, effects)
-        offsets = [params.combine_offsets(h, r) for h, r in zip(offsets or [None] * len(rest_shifts), rest_shifts)]
-    train(four_factors, priors, engine, checkpoint if engine == "pymc" else None, sigma=sigma, offsets=offsets)
-    if with_pace:
-        start_pace(priors, team_ids, pace_params["start_mean"], pace_params["start_std"])
-        train_pace(data["possessions"], priors, pace_params["sigma"])
+    trained = train_priors(data, engine, sigma_update, pace, home, rest,
+                           checkpoint=checkpoint if engine == "pymc" else None)
+    priors, sides, rest_rows = trained["priors"], trained["sides"], trained["rest_rows"]
+    pace_params, effects = trained["pace_params"], trained["effects"]
     write_priors(out_path, priors)
     done = time.perf_counter()
 

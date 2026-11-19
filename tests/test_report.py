@@ -286,8 +286,12 @@ def test_build_writes_the_report_and_chart(tmp_path, season_files, monkeypatch):
                      "spread_home": spread, "vegas_total": 225.5, "p_ml": None})
         games.append({"game_id": gid, "date": day, "home": f"T{i % 30}", "away": f"T{(i + 7) % 30}",
                       "home_won": margin > 0})
-    train = {"rows": rows, "scored": len(rows), "sd": report.fit_spread_sd([r["margin"] for r in rows],
-                                                                            [r["spread_home"] for r in rows]),
+    pass_rows = [{**r, "p_model": float(np.clip(r["p_model"] + rng.normal(0, 0.05), 0.01, 0.99))} for r in rows[2:]]
+    train = {"rows": rows, "pass_rows": pass_rows, "scored": len(pass_rows),
+             "live": {"n": 20, "m": 30, "seasons": {
+                 s: {"cutoff": f"{s[:4]}-10-03", "trained_on": "x to y", "train_games": 2600, "games": 200, "skipped": []}
+                 for s in ("2024-25", "2025-26")}},
+             "sd": report.fit_spread_sd([r["margin"] for r in rows], [r["spread_home"] for r in rows]),
              "baselines": report.fit_baselines(games), "records": report.records_before(games),
              "match": {"matched": 400, "games": 400, "rate": 1.0}, "first": "2023-10-24", "last": "2026-06-13"}
     monkeypatch.setattr(report, "training_sample", lambda training_csv, betting_csv: train)
@@ -300,7 +304,9 @@ def test_build_writes_the_report_and_chart(tmp_path, season_files, monkeypatch):
     text = out.read_text(encoding="utf-8")
     png = out.parent / report.CHART_NAME
     assert png.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
-    for heading in ("## Summary", "## Resume bullets", "## Method", "## Training seasons", "**Paired differences vs Vegas",
+    for heading in ("## Summary", "## Resume bullets", "## Method", "## Training seasons, main: live-procedure backtest (400",
+                    "## Training seasons, secondary: training-pass backtest (398", "**Live procedure − training pass** on the 398",
+                    "**Paired differences vs Vegas",
                     "**Model vs the baselines**", "**Disagreements:**", "**Calibration**", "## 2026-27 season",
                     "### With Vegas closing lines (2 games)", "**Games with a moneyline:**", "## Caveats"):
         assert heading in text, heading
@@ -308,6 +314,28 @@ def test_build_writes_the_report_and_chart(tmp_path, season_files, monkeypatch):
     assert 3 <= bullets.count("\n- ") <= 4
     assert result["season"]["vegas"]["n"] == 2 and result["season"]["all"]["n"] == 4
     assert result["train"]["result"]["n"] == 400
+
+
+def test_calibration_sentence_uses_two_binomial_ses():
+    # n = 2,500 at 66% accuracy: SE ~ 0.95 pts, so a 4-point gap is underconfident and a 1-point gap is fine
+    assert "underconfident" in report.calibration_sentence("x", {"n": 2500, "accuracy": 0.66, "confidence": 0.62})
+    assert "overconfident" in report.calibration_sentence("x", {"n": 2500, "accuracy": 0.62, "confidence": 0.66})
+    assert "calibrated within noise" in report.calibration_sentence("x", {"n": 2500, "accuracy": 0.66, "confidence": 0.65})
+    assert "calibrated within noise" in report.calibration_sentence("x", {"n": 100, "accuracy": 0.66, "confidence": 0.62})
+
+
+def test_compare_procedures_pairs_common_games_only():
+    def row(gid, p, won, proj, margin):
+        return {"game_id": gid, "p_model": p, "home_won": won, "proj_margin": proj, "margin": margin}
+    live = [row("a", 0.8, True, 6, 10), row("b", 0.6, False, 2, -3), row("c", 0.7, True, 4, 5)]
+    old = [row("a", 0.6, True, 2, 10), row("b", 0.4, False, -1, -3), row("z", 0.5, True, 0, 1)]
+    proc = report.compare_procedures(live, old)
+    assert proc["n"] == 2                                              # "c" and "z" aren't in both
+    # Brier live (0.04, 0.36) vs old (0.16, 0.16): diffs -0.12 and +0.20
+    assert proc["brier"]["diff"] == pytest.approx(0.04)
+    assert proc["accuracy"]["diff"] == pytest.approx(-0.5)            # live misses "b", old gets it
+    assert proc["margin_mae"]["diff"] == pytest.approx(((4 - 8) + (5 - 2)) / 2)
+    assert report.compare_procedures(live, [])["n"] == 0
 
 
 def test_cli_checks_its_inputs(tmp_path):

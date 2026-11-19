@@ -22,11 +22,15 @@ Predictors
 
 Samples
 -------
-  Training      seasons 2 and 3 of the 3-year training window (--before 2026-10-03), one-step-
-                ahead: train_calibration.run_pass's live variant, each game simulated from the
-                ratings as they stood before it (the first season is burn-in). Vegas: Kaggle lines
-                (historical_lines.py). Caveat: the model's constants (sigma, home, rest, pace,
-                points formula) and the Vegas SD were fitted on these same seasons.
+  Training      2024-25 and 2025-26, two backtests, each game predicted only from earlier games.
+                Vegas: Kaggle lines (historical_lines.py).
+                MAIN: the live in-season procedure (backtest.py): preseason priors from the live
+                training recipe on the 3 years before each season, season reset (N = 20), then
+                each game predicted and applied with drift (M = 30), as update.py --update does.
+                SECONDARY: train_calibration.run_pass's live variant, i.e. the TRAINING pass (tau = 0,
+                no season reset) over the 3-year window, the first season as burn-in.
+                Caveat: the model's constants (sigma, home, rest, pace, points formula) and the Vegas
+                SD were fitted on these same seasons.
   2026-27       the live predictions (log_pace-home-rest.csv, then prediction_log.csv for later
                 games), each made before the game. Vegas: closing lines from data/lines_2026-27.csv
                 (lines.closing_lines), only for games that have one, so that comparison grows as
@@ -52,6 +56,7 @@ from pathlib import Path
 
 import numpy as np
 
+import backtest
 import dynamic_model
 import historical_lines
 import lines
@@ -245,8 +250,24 @@ def check_live_variant():
         raise RuntimeError(f"train_calibration's {LIVE_VARIANT!r} variant {v} is not the live simulation {expected}")
 
 
+def join_lines(model_rows: list, by_id: dict, line_by_id: dict) -> list:
+    """Model rows ({"game_id", "home_won", "margin", "total", "p_model", "proj_margin", "proj_total"}) with
+    their game's date, season, type and Vegas spread / total; games without both lines are left out."""
+    out = []
+    for r in model_rows:
+        line, g = line_by_id.get(r["game_id"]), by_id.get(r["game_id"])
+        if g is None or line is None or line["spread_home"] is None or line["total"] is None:
+            continue
+        out.append({**r, "date": g["date"], "season": season_of(r["game_id"]), "game_type": g["game_type"],
+                    "spread_home": line["spread_home"], "vegas_total": line["total"], "p_ml": None})
+    return out
+
+
 def training_sample(training_csv, betting_csv) -> dict:
-    """The training seasons: one-step-ahead model predictions, Kaggle lines, baselines, the fitted Vegas SD."""
+    """
+    The training seasons: both backtests' predictions (main: the live procedure, backtest.py; secondary:
+    the training pass, train_calibration.run_pass) joined to the Kaggle lines, plus baselines and the Vegas SD.
+    """
     check_live_variant()
     data = dynamic_model.load_training_rows(training_csv, dynamic_model.TRAINING_CUTOFF, 3)
     games = historical_lines.games_from_frame(data["cleaned"])
@@ -262,19 +283,29 @@ def training_sample(training_csv, betting_csv) -> dict:
     baselines = fit_baselines(games)
     records = records_before(games)
 
+    live = backtest.run_backtest(training_csv, data=data)
     records_out = train_calibration.run_pass(data, params.DEFAULT_HOME_MODE, [LIVE_VARIANT], params.DEFAULT_REST_MODE,
                                              with_ids=True)[LIVE_VARIANT]
-    rows = []
-    for p, margin, proj_margin, proj_total, total, _, gid in records_out:
-        line, g = line_by_id.get(gid), by_id.get(gid)
-        if g is None or line is None or line["spread_home"] is None or line["total"] is None:
-            continue
-        rows.append({"game_id": gid, "date": g["date"], "season": season_of(gid), "game_type": g["game_type"],
-                     "home_won": margin > 0, "margin": margin, "total": total, "p_model": p,
-                     "proj_margin": proj_margin, "proj_total": proj_total, "spread_home": line["spread_home"],
-                     "vegas_total": line["total"], "p_ml": None})
-    return {"rows": rows, "scored": len(records_out), "sd": sd, "baselines": baselines, "records": records,
+    pass_rows = [{"game_id": gid, "home_won": margin > 0, "margin": margin, "total": total, "p_model": p,
+                  "proj_margin": proj_margin, "proj_total": proj_total}
+                 for p, margin, proj_margin, proj_total, total, _, gid in records_out]
+    return {"rows": join_lines(live["rows"], by_id, line_by_id), "pass_rows": join_lines(pass_rows, by_id, line_by_id),
+            "live": live, "scored": len(records_out), "sd": sd, "baselines": baselines, "records": records,
             "match": match, "first": data["first"], "last": data["last"]}
+
+
+def compare_procedures(live_rows: list, pass_rows: list) -> dict:
+    """Paired live procedure − training pass on the games both scored: accuracy, Brier, log loss, margin MAE."""
+    by_id = {r["game_id"]: r for r in pass_rows}
+    common = [(r, by_id[r["game_id"]]) for r in live_rows if r["game_id"] in by_id]
+    if not common:
+        return {"n": 0}
+    won = [a["home_won"] for a, _ in common]
+    a = evaluate([x["p_model"] for x, _ in common], won, [x["proj_margin"] for x, _ in common], [x["margin"] for x, _ in common])
+    b = evaluate([y["p_model"] for _, y in common], won, [y["proj_margin"] for _, y in common], [y["margin"] for _, y in common])
+    return {"n": len(common), "live": a, "pass": b,
+            **{k: paired(a["each"][key], b["each"][key]) for k, key in
+               (("accuracy", "hit"), ("brier", "brier"), ("log_loss", "log_loss"), ("margin_mae", "margin_err"))}}
 
 
 def log_row_to_game(r: dict) -> dict:
@@ -432,7 +463,7 @@ def draw_chart(path, panels: list) -> None:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    colors = {"Model": "#2563eb", "Vegas (spread)": "#dc2626"}
+    colors = {"Model": "#2563eb", "Vegas (spread)": "#dc2626", "Model, training pass (secondary)": "#9ca3af"}
     fig, axes = plt.subplots(1, len(panels), figsize=(6 * len(panels), 5.6), squeeze=False)
     for ax, (title, cal) in zip(axes[0], panels):
         ax.plot([0.5, 1], [0.5, 1], color="#9ca3af", linestyle="--", linewidth=1, label="perfect calibration")
@@ -509,7 +540,8 @@ def resume_bullets(train: dict, season: dict) -> list:
         "Built a Bayesian NBA game predictor in Python: Four Factors offense/defense ratings updated game by game "
         "with conjugate Normal (Kalman) updates, and a 10,000-draw Monte Carlo game simulation with team pace, "
         "home-court and rest effects fitted by one-step-ahead likelihood.",
-        f"Backtested one step ahead on {n:,} games (2024-25 and 2025-26): the model {vs}.",
+        f"Backtested the live procedure (preseason ratings trained only on earlier seasons, then updated "
+        f"after every game) on {n:,} games of 2024-25 and 2025-26: the model {vs}.",
         f"On the same games the model {baseline_phrase('always picking the home team', t['vs_baselines']['Home team'], m, home)}, "
         f"and {baseline_phrase('picking the team with the better record', t['vs_baselines']['Better record'], m, t['metrics']['Better record'])}.",
     ]
@@ -549,16 +581,58 @@ def significance_sentence(paired_model: dict) -> str:
     return ("; ".join(parts) + ".") if parts else "No metric differs from Vegas by 2 SE or more."
 
 
+def calibration_sentence(label: str, m: dict) -> str:
+    """Average confidence vs accuracy in words: over/underconfident when they differ by 2+ binomial SEs."""
+    gap = m["accuracy"] - m["confidence"]
+    se = math.sqrt(m["accuracy"] * (1 - m["accuracy"]) / m["n"])
+    if abs(gap) < 2 * se:
+        word = "calibrated within noise"
+    else:
+        word = "underconfident" if gap > 0 else "overconfident"
+    return (f"{label} {word} (average confidence {fmt(m['confidence'], 'pct')} vs {fmt(m['accuracy'], 'pct')} of "
+            f"winners picked)")
+
+
 def sha256(path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def training_section(L: list, result: dict, by_season: dict, calibration: bool = True) -> None:
+    """The tables of one training backtest: metrics, paired vs Vegas, vs baselines, disagreements, by season, calibration."""
+    L.append(metrics_table(result["metrics"]) + "\n")
+    L.append("**Paired differences vs Vegas (spread)** (negative Brier / log loss / MAE = better than Vegas):\n")
+    L.append(paired_table(result["paired"]) + "\n")
+    L.append("**Model vs the baselines** (positive accuracy / negative Brier and log loss = the model is better):\n")
+    L.append(baseline_table(result["vs_baselines"]) + "\n")
+    d = result["disagree"]
+    L.append(f"**Disagreements:** the model and Vegas picked different winners in {d['games']} games "
+             f"({100 * d['games'] / result['n']:.1f}%); the model was right in {d['model_right']} "
+             f"({100 * d['model_right'] / max(d['games'], 1):.1f}%), Vegas in {d['vegas_right']}. "
+             f"({d['vegas_pickem']} pick'em lines had no Vegas pick.) "
+             f"On average the model's margin is {result['gap']['margin']:.2f} pts and its total "
+             f"{result['gap']['total']:.2f} pts from the Vegas numbers.\n")
+    L.append("**By season** (same games, split):\n")
+    rows = []
+    for season_name, r in by_season.items():
+        mm, vv = r["metrics"]["Model"], r["metrics"]["Vegas (spread)"]
+        rows.append([season_name, r["n"], fmt(mm["accuracy"], "pct"), fmt(vv["accuracy"], "pct"),
+                     fmt(mm["brier"], "brier"), fmt(vv["brier"], "brier"), diff_cell(r["paired"]["Model"]["brier"], "brier")])
+    L.append(md_table(["Season", "Games", "Model acc.", "Vegas acc.", "Model Brier", "Vegas Brier",
+                       "Brier diff (model − Vegas)"], rows) + "\n")
+    if calibration:
+        L.append("**Calibration**\n")
+        L.append(calibration_table(result["calibration"]) + "\n")
 
 
 def write_report(train: dict, season: dict, out_path: Path, betting_csv: Path, lines_path: Path) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     chart = out_path.parent / CHART_NAME
-    t, sd = train["result"], train["sd"]
+    t, tp, sd = train["result"], train["pass_result"], train["sd"]
     s_all, s_vegas = season["all"], season["vegas"]
-    panels = [(f"Training seasons, one-step-ahead ({t['n']:,} games)", t["calibration"])]
+    live_info = train["live"]
+    panel = dict(t["calibration"])
+    panel["Model, training pass (secondary)"] = tp["calibration"]["Model"]
+    panels = [(f"Training seasons, live-procedure backtest ({t['n']:,} games)", panel)]
     if s_all["n"]:
         cal = dict(s_all["calibration"])
         if s_vegas["n"]:
@@ -566,9 +640,10 @@ def write_report(train: dict, season: dict, out_path: Path, betting_csv: Path, l
         panels.append((f"2026-27 so far (model: {s_all['n']} games; Vegas: {s_vegas['n']})", cal))
     draw_chart(chart, panels)
 
-    m_tr = t["metrics"]["Model"]
+    m_tr, v_tr = t["metrics"]["Model"], t["metrics"]["Vegas (spread)"]
     b = train["baselines"]
     match = train["match"]
+    proc = train["procedures"]
     L = []
     L.append("# Accuracy report: the live model vs Vegas and simple baselines\n")
     L.append(f"Generated {date.today().isoformat()} by `python code/report.py`. Live model as in `params.py`: "
@@ -576,12 +651,18 @@ def write_report(train: dict, season: dict, out_path: Path, betting_csv: Path, l
              f"(back-to-backs), 10,000-draw simulation.\n")
     L.append("## Summary\n")
     pb = t["paired"]["Model"]
-    L.append(f"- **Training seasons (2024-25, 2025-26; {t['n']:,} games, one-step-ahead):** model "
+    L.append(f"- **Training seasons, live-procedure backtest (2024-25, 2025-26; {t['n']:,} games):** model "
              f"{fmt(m_tr['accuracy'], 'pct')} winners, Brier {fmt(m_tr['brier'], 'brier')}; Vegas closing spread "
-             f"{fmt(t['metrics']['Vegas (spread)']['accuracy'], 'pct')}, Brier "
-             f"{fmt(t['metrics']['Vegas (spread)']['brier'], 'brier')}. Model − Vegas: Brier "
+             f"{fmt(v_tr['accuracy'], 'pct')}, Brier {fmt(v_tr['brier'], 'brier')}. Model − Vegas: Brier "
              f"{diff_cell(pb['brier'], 'brier')}, accuracy {diff_cell(pb['accuracy'], 'pct', 100)}. "
              + significance_sentence(pb))
+    if proc["n"]:
+        L.append(f"- **The live procedure vs the training-pass backtest** (secondary, {proc['n']:,} common games): "
+                 f"Brier {diff_cell(proc['brier'], 'brier')}, accuracy {diff_cell(proc['accuracy'], 'pct', 100)} "
+                 f"(live − training pass).")
+    L.append("- **Calibration:** " + calibration_sentence("live-procedure backtest", m_tr)
+             + ("; " + calibration_sentence(f"2026-27 ({s_all['n']} games)", s_all["metrics"]["Model"])
+                if s_all["n"] else "") + ".")
     if s_vegas["n"]:
         pv = s_vegas["paired"]["Model"]
         L.append(f"- **2026-27 with closing lines ({s_vegas['n']} games):** model "
@@ -607,13 +688,22 @@ def write_report(train: dict, season: dict, out_path: Path, betting_csv: Path, l
     L.append("\nEvery number above is from this report; the training-season numbers are backtests (see the caveats).\n")
 
     L.append("## Method\n")
-    L.append(f"- **Model:** the live settings. Training sample: `train_calibration.py`'s one-step-ahead pass over "
-             f"the 3-year window before 2026-10-03 ({train['first']} to {train['last']}): ratings start flat, every "
-             f"game updates them, and each game after the first season ({train['scored']:,} games) is simulated from "
-             f"the ratings as they stood before it. That pass is the TRAINING update (tau = 0, no season reset), so "
-             f"its ratings never forget: by 2025-26 they weigh a game from 2023-24 as much as last night's. The "
-             f"live 2026-27 pipeline instead resets the stds each season (0.1/√20) and adds drift every game "
-             f"(0.1/30). 2026-27: the logged predictions, each made before the game "
+    seasons_text = "; ".join(f"{name}: priors trained on {info['train_games']:,} games ({info['trained_on']}, cutoff "
+                             f"{info['cutoff']}), then {info['games']:,} games played"
+                             for name, info in live_info["seasons"].items())
+    L.append(f"- **Model, main training backtest (`backtest.py`): the live in-season procedure.** For each season, "
+             f"preseason priors come from the live training recipe (flat start, every game of the 3 years before "
+             f"Oct 3 of that season, as `priors_pre_2026-27_pace-home-rest.json` was trained before 2026-10-03), then "
+             f"the season reset (N = {live_info['n']}: stds 0.1/√{live_info['n']}), then each game is predicted with "
+             f"`predict.predict_game` (the prediction log's seed) and applied with drift (M = {live_info['m']}), "
+             f"as `update.py --update` does. {seasons_text}. The Kaggle file has no game types for 2021-22, so "
+             f"2024-25's priors rest on 2022-23 and 2023-24 only. Playoff and play-in games are included.")
+    L.append(f"- **Model, secondary training backtest:** `train_calibration.py`'s one-step-ahead pass over the 3-year "
+             f"window before 2026-10-03 ({train['first']} to {train['last']}): ratings start flat, every game updates "
+             f"them with the TRAINING update (tau = 0, no season reset), and each game after the first season "
+             f"({train['scored']:,} games) is simulated from the ratings as they stood. Its ratings never forget, "
+             f"so by 2025-26 a game from 2023-24 weighs as much as last night's.")
+    L.append(f"- **Model, 2026-27:** the logged predictions, each made before the game "
              f"({', '.join(f'`{n}` ({k})' for n, k in season['logs']) or 'no logs'}).")
     L.append(f"- **Vegas (spread):** P(home wins) = Φ(−spread_home / SD), SD = **{sd['sd']:.2f} points**, fitted on "
              f"the {sd['n']:,} training games with a line (the RMS of actual home margin + spread; the mean residual "
@@ -627,8 +717,8 @@ def write_report(train: dict, season: dict, out_path: Path, betting_csv: Path, l
              f"records fall back to the home team.")
     L.append("- **Metrics:** winner accuracy (a 50/50 pick counts half), Brier = mean (P(home) − home won)², log loss "
              "(P clipped to [0.0001, 0.9999]), margin / total MAE vs the actual result, calibration in confidence "
-             "bins. All predictors are scored on the same games. Paired differences are per-game differences vs "
-             "Vegas (spread), mean ± SE (SD/√n); |z| < 2 is within noise.")
+             "bins. All predictors in a table are scored on the same games. Paired differences are per-game "
+             "differences, mean ± SE (SD/√n); |z| < 2 is within noise.")
     L.append(f"- **Data:** Kaggle \"NBA Betting Data | October 2007 to June 2026\" (`{betting_csv.name}`, SHA-256 "
              f"`{sha256(betting_csv)[:16]}…`), matched to {match['matched']:,} of {match['games']:,} training games "
              f"({100 * match['rate']:.1f}%). 2026-27 lines: "
@@ -638,30 +728,21 @@ def write_report(train: dict, season: dict, out_path: Path, betting_csv: Path, l
              + (f" (median {season['hours_before']:.1f} h before tip-off)." if season["hours_before"] is not None else "."))
     L.append("")
 
-    L.append(f"## Training seasons: 2024-25 and 2025-26 ({t['n']:,} games)\n")
-    L.append(metrics_table(t["metrics"]) + "\n")
-    L.append("**Paired differences vs Vegas (spread)** (negative Brier / log loss / MAE = better than Vegas):\n")
-    L.append(paired_table(t["paired"]) + "\n")
-    L.append("**Model vs the baselines** (positive accuracy / negative Brier and log loss = the model is better):\n")
-    L.append(baseline_table(t["vs_baselines"]) + "\n")
-    d = t["disagree"]
-    L.append(f"**Disagreements:** the model and Vegas picked different winners in {d['games']} games "
-             f"({100 * d['games'] / t['n']:.1f}%); the model was right in {d['model_right']} "
-             f"({100 * d['model_right'] / max(d['games'], 1):.1f}%), Vegas in {d['vegas_right']}. "
-             f"({d['vegas_pickem']} pick'em lines had no Vegas pick.) "
-             f"On average the model's margin is {t['gap']['margin']:.2f} pts and its total {t['gap']['total']:.2f} pts "
-             f"from the Vegas numbers.\n")
-    L.append("**By season** (same games, split):\n")
-    rows = []
-    for season_name, r in train["by_season"].items():
-        mm, vv = r["metrics"]["Model"], r["metrics"]["Vegas (spread)"]
-        rows.append([season_name, r["n"], fmt(mm["accuracy"], "pct"), fmt(vv["accuracy"], "pct"),
-                     fmt(mm["brier"], "brier"), fmt(vv["brier"], "brier"), diff_cell(r["paired"]["Model"]["brier"], "brier")])
-    L.append(md_table(["Season", "Games", "Model acc.", "Vegas acc.", "Model Brier", "Vegas Brier",
-                       "Brier diff (model − Vegas)"], rows) + "\n")
-    L.append("**Calibration**\n")
-    L.append(calibration_table(t["calibration"]) + "\n")
+    L.append(f"## Training seasons, main: live-procedure backtest ({t['n']:,} games)\n")
+    training_section(L, t, train["by_season"])
     L.append(f"![Calibration chart]({CHART_NAME})\n")
+
+    L.append(f"## Training seasons, secondary: training-pass backtest ({tp['n']:,} games)\n")
+    L.append("The same seasons predicted from the training pass (no season reset, no drift), the setup of "
+             "`train_calibration.py`. Kept for comparison; it is not how the model runs live.\n")
+    training_section(L, tp, train["pass_by_season"], calibration=False)
+    if proc["n"]:
+        L.append(f"**Live procedure − training pass** on the {proc['n']:,} games both scored (negative Brier / log "
+                 f"loss / MAE and positive accuracy = the live procedure is better):\n")
+        L.append(md_table(["", "Accuracy", "Brier", "Log loss", "Margin MAE"],
+                          [["Live − training pass", diff_cell(proc["accuracy"], "pct", 100),
+                            diff_cell(proc["brier"], "brier"), diff_cell(proc["log_loss"], "ll"),
+                            diff_cell(proc["margin_mae"], "pts")]]) + "\n")
 
     L.append("## 2026-27 season\n")
     L.append(f"### With Vegas closing lines ({s_vegas['n']} games)\n")
@@ -691,23 +772,14 @@ def write_report(train: dict, season: dict, out_path: Path, betting_csv: Path, l
                  f"{100 * math.sqrt(0.25 / s_all['n']):.1f} points.\n")
 
     L.append("## Caveats\n")
-    L.append("- **The training sample is a backtest, not a forecast.** Each prediction uses only earlier games for the "
-             "team ratings, but the model's constants (game noise σ, home boost, rest effect, pace noise, points "
-             "formula) were fitted on these same three seasons, which flatters the model a little. The Vegas SD "
-             "(one number) was fitted on them too. 2026-27 is the only true out-of-sample test.")
-    signs = []
-    if verdict(t["vs_baselines"]["Better record"]["accuracy"], lower_is_better=False) == "worse":
-        signs.append("in the backtest it trails the better-record baseline on winners picked")
-    seasons = list(train["by_season"].values())
-    if len(seasons) >= 2 and seasons[-1]["paired"]["Model"]["brier"]["diff"] > seasons[0]["paired"]["Model"]["brier"]["diff"]:
-        signs.append(f"its Brier gap to Vegas grows from {list(train['by_season'])[0]} to {list(train['by_season'])[-1]} "
-                     f"({seasons[0]['paired']['Model']['brier']['diff']:+.4f} → "
-                     f"{seasons[-1]['paired']['Model']['brier']['diff']:+.4f}) as the ratings get stiffer")
-    L.append("- **The backtest's ratings don't adapt within a season the way the live model's do** (training pass: "
-             "tau = 0, no season reset; see Method). That may understate the live model"
-             + (": " + ", and ".join(signs) if signs else "") + ". A backtest with the live in-season procedure "
-             "(season reset + drift) would be the fairer test, but it isn't what this report runs.")
-    L.append("- **The first training season is burn-in** (ratings start flat), so it isn't scored.")
+    L.append("- **The training seasons are a backtest, not a forecast.** Each prediction uses only earlier games for "
+             "the team ratings, but the model's constants (game noise σ, home boost, rest effect, pace noise, points "
+             "formula) were fitted on the 2023-24 to 2025-26 window, which flatters the model a little. The Vegas SD "
+             "(one number) was fitted on it too. 2026-27 is the only true out-of-sample test.")
+    L.append(f"- **The season reset and drift (N = {live_info['n']}, M = {live_info['m']}) are the live settings,** "
+             "used as they are; no other values were tried on these backtests.")
+    L.append("- **The live-procedure backtest differs from the live run only in its data:** the games come from the "
+             "Kaggle CSV (the same NBA.com four factors and possessions), and playoff / play-in games are included.")
     L.append("- **Kaggle lines:** the dataset gives one spread and total per game and doesn't say exactly when they "
              "were taken; treat them as closing or near-closing lines.")
     L.append("- **2026-27 \"closing\" lines** are the last snapshot before tip-off, which can be hours before the true "
@@ -721,10 +793,13 @@ def build(training_csv, betting_csv, log_paths, lines_path, out_path) -> dict:
     train = training_sample(training_csv, betting_csv)
     sd = train["sd"]["sd"]
     train["result"] = score_games(train["rows"], sd, train["baselines"], train["records"], with_vegas=True)
-    train["by_season"] = {}
-    for season in sorted({r["season"] for r in train["rows"]}):
-        rows = [r for r in train["rows"] if r["season"] == season]
-        train["by_season"][season] = score_games(rows, sd, train["baselines"], train["records"], with_vegas=True)
+    train["pass_result"] = score_games(train["pass_rows"], sd, train["baselines"], train["records"], with_vegas=True)
+    for key, rows_key in (("by_season", "rows"), ("pass_by_season", "pass_rows")):
+        train[key] = {}
+        for season in sorted({r["season"] for r in train[rows_key]}):
+            rows = [r for r in train[rows_key] if r["season"] == season]
+            train[key][season] = score_games(rows, sd, train["baselines"], train["records"], with_vegas=True)
+    train["procedures"] = compare_procedures(train["rows"], train["pass_rows"])
 
     s = season_sample(log_paths, lines_path)
     season = {"all": score_games(s["games"], sd, train["baselines"], s["records"], with_vegas=False),
