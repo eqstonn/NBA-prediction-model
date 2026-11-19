@@ -15,9 +15,9 @@ def get_teams():
     """
     pass
 
-def simulate_factors(team_a, team_b, data: dict):
+def simulate_factors(team_a, team_b, data: dict, seed=None):
     n_sim = 10000
-    rng = np.random.default_rng()
+    rng = np.random.default_rng(seed)  # seed=None: fresh randomness (website); an int: reproducible (prediction log)
 
     #find team a expected 4 factors in the game
     a_o_eFG = rng.normal(loc = data[team_a]["offense"]["eFG"]["mean"], scale = data[team_a]["offense"]["eFG"]["std"], size = n_sim)

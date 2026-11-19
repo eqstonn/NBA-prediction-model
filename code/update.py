@@ -5,6 +5,8 @@ In-season updates to priors.json.
     python code/update.py --start-season --n 10   # looser priors: worth 10 games of evidence
     python code/update.py --update                # apply every finished, not-yet-applied game
     python code/update.py --update --through 2026-11-01 --limit 20   # stop at a date / after 20 games
+    python code/update.py --replay --from priors_pre_2026-27.json --out priors_x.json --log log_x.csv
+                                                  # rebuild the season into another file (model experiments)
     python code/update.py --trial 5               # dry run: first 5 games of the season, writes nothing
     python code/update.py --trial 5 --m 20        # same with more drift per game (tau = 0.1/20)
 
@@ -45,6 +47,18 @@ After every game both files are saved, crash-safely (write-ahead):
 On the next start a leftover pending entry is resolved by comparing fingerprints: if
 priors.json already has the game it is kept, otherwise it is dropped and re-applied.
 So a crash at any point never loses a finished game or applies one twice.
+
+Prediction log and replay
+-------------------------
+Before a game is applied it is predicted from the current priors (predict.predict_game,
+fixed simulation seed) and appended to prediction_log.csv (see predlog.py); a game
+already in the log is never added twice. Each run ends with the log's winner accuracy,
+spread MAE and Brier score. PyMC fits use a fixed seed per game (fit_seed), so a run is
+reproducible.
+
+--replay rebuilds the season into another file: season reset from --from, then every
+game in applied_games.json oldest first, each predicted + logged into --log before it is
+applied. It writes only --out and --log. Compare logs with code/compare.py.
 """
 import argparse
 import copy
@@ -61,12 +75,15 @@ from pathlib import Path
 # bayes_update sets PYTENSOR_FLAGS before it imports pymc
 from bayes_update import FACTORS, update_game
 import boxscores
+import predlog
+from predict import predict_game
 from schedule import NBA_TEAMS
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FROZEN_PRIORS_PATH = REPO_ROOT / "priors_pre_2026-27.json"  # READ-ONLY, never write
 PRIORS_PATH = REPO_ROOT / "priors.json"
 APPLIED_GAMES_PATH = REPO_ROOT / "applied_games.json"
+LOG_PATH = REPO_ROOT / "prediction_log.csv"                 # --update's prediction log
 
 SIDES = ("offense", "defense")
 STD_SCALE = 0.1
@@ -200,13 +217,35 @@ def record_game(priors: dict, applied: dict, game: dict) -> None:
     write_json(APPLIED_GAMES_PATH, applied)   # 3. done
 
 
-def run_update(through=None, limit=None, m: int = DEFAULT_M) -> dict:
+def fit_seed(game_id: str) -> int:
+    """Fixed PyMC seed for a game (its gameId as a number), so updates and replays are reproducible."""
+    return int(game_id)
+
+
+def log_prediction(priors: dict, game: dict, log_path) -> None:
+    """Predict `game` from `priors` (fixed simulation seed) and append it to the log unless it's already there."""
+    prediction = predict_game(game["home"]["id"], game["away"]["id"], priors, seed=predlog.PREDICT_SEED)
+    if prediction is None:
+        raise KeyError(f"game {game['game_id']}: a team is missing from the priors")
+    predlog.append_rows(log_path, [predlog.make_row(game, prediction)])
+
+
+def print_log_metrics(log_path) -> dict:
+    m = predlog.metrics(predlog.read_log(log_path))
+    print(f"Prediction log {Path(log_path).name}: {predlog.format_metrics(m)}")
+    return m
+
+
+def run_update(through=None, limit=None, m: int = DEFAULT_M, log_path=None) -> dict:
     """
     Apply every finished, not-yet-applied game (oldest first) to priors.json; saves after
-    each game. `through` = last date to include (YYYY-MM-DD), `limit` = max games to apply.
+    each game. Each game is first predicted from the current priors and logged to
+    `log_path` (default prediction_log.csv). `through` = last date to include
+    (YYYY-MM-DD), `limit` = max games to apply.
     Returns {"applied": [ids], "skipped": [(id, reason)], "already": count, "remaining": count,
-             "disagreements": [game log vs schedule warnings]}.
+             "disagreements": [game log vs schedule warnings], "metrics": {...} of the whole log}.
     """
+    log_path = Path(log_path or LOG_PATH)
     _quiet_pymc()
     applied = load_applied()
     priors = load_json(PRIORS_PATH)
@@ -235,7 +274,9 @@ def run_update(through=None, limit=None, m: int = DEFAULT_M) -> dict:
             continue
 
         t = time.perf_counter()
-        new_priors = apply_game(copy.deepcopy(priors), boxscores.with_factors(game, factors), m)
+        game = boxscores.with_factors(game, factors)
+        log_prediction(priors, game, log_path)   # before applying: the prediction uses pre-game priors
+        new_priors = apply_game(copy.deepcopy(priors), game, m, random_seed=fit_seed(game["game_id"]))
         record_game(new_priors, applied, game)
         priors = new_priors
         done.append(game["game_id"])
@@ -245,8 +286,70 @@ def run_update(through=None, limit=None, m: int = DEFAULT_M) -> dict:
     print(f"\nApplied {len(done)} game(s) in {time.perf_counter() - start:.0f} s; skipped {len(skipped)}; "
           f"{already} were already applied; {remaining} left for a later run; "
           f"{len(disagreements)} game log/schedule disagreement(s).")
+    log_metrics = print_log_metrics(log_path)
     return {"applied": done, "skipped": skipped, "already": already, "remaining": remaining,
-            "disagreements": disagreements}
+            "disagreements": disagreements, "metrics": log_metrics}
+
+
+# ---------------------------------------------------------------------------
+# replay
+# ---------------------------------------------------------------------------
+
+def _replay_game(game_id: str, entry: dict, factors: dict) -> dict:
+    """A boxscores.py-shaped game from its applied_games.json entry and its cached four factors."""
+    away_abbr, home_abbr = entry["matchup"].split(" @ ")
+    away_pts, home_pts = (int(x) for x in entry["score"].split("-"))
+    for side, abbr in (("home", home_abbr), ("away", away_abbr)):
+        if NBA_TEAMS.get(factors[side]["id"], ("?",))[0] != abbr:
+            raise ValueError(f"game {game_id}: box score {side} team {factors[side]['id']} is not {abbr}")
+    home = {"abbr": home_abbr, "pts": home_pts, **factors["home"]}
+    away = {"abbr": away_abbr, "pts": away_pts, **factors["away"]}
+    return {"game_id": game_id, "date": entry["date"], "home": home, "away": away,
+            "winner": home["id"] if home_pts > away_pts else away["id"]}
+
+
+def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M) -> dict:
+    """
+    Season reset from `from_path` (std 0.1/sqrt(n)), then every game in applied_games.json,
+    oldest first (date, gameId), each predicted + logged before it is applied. Writes ONLY
+    `out_path` (at the end) and `log_path` (rebuilt from scratch); reads applied_games.json
+    and the box-score cache, never writes priors.json or applied_games.json.
+    """
+    from_path, out_path, log_path = Path(from_path), Path(out_path), Path(log_path)
+    protected = {p.resolve(): p.name for p in (PRIORS_PATH, APPLIED_GAMES_PATH, FROZEN_PRIORS_PATH, LOG_PATH, from_path)}
+    for flag, path in (("--out", out_path), ("--log", log_path)):
+        if path.resolve() in protected:
+            raise ValueError(f"{flag} {path} would overwrite {protected[path.resolve()]}; pick another file")
+    if out_path.resolve() == log_path.resolve():
+        raise ValueError("--out and --log must be different files")
+
+    applied = load_json(APPLIED_GAMES_PATH)
+    if any("pending" in entry for entry in applied.values()):
+        raise RuntimeError(f"{APPLIED_GAMES_PATH.name} has a pending game; run --update once to resolve it first")
+    order = sorted(applied, key=lambda gid: (applied[gid]["date"], gid))
+
+    _quiet_pymc()
+    priors = reset_priors(load_json(from_path), n)
+    if log_path.exists():
+        log_path.unlink()   # a replay rebuilds its log from scratch
+    print(f"Replaying {len(order)} games from {applied[order[0]]['date']} to {applied[order[-1]]['date']}, "
+          f"oldest first, from {from_path.name} (N={n}, M={m}) -> {out_path.name}, {log_path.name}\n")
+
+    start = time.perf_counter()
+    for i, game_id in enumerate(order, 1):
+        factors, problem = boxscores.get_game_factors(game_id)
+        if problem:
+            raise RuntimeError(f"can't replay {game_id}: {problem}")
+        game = _replay_game(game_id, applied[game_id], factors)
+        t = time.perf_counter()
+        log_prediction(priors, game, log_path)
+        apply_game(priors, game, m, random_seed=fit_seed(game_id))
+        print(f"  [{i:>4}/{len(order)}] {game['date']}  {applied[game_id]['matchup']}  ({game_id})  "
+              f"{time.perf_counter() - t:.1f} s")
+
+    write_json(out_path, priors)
+    print(f"\nReplayed {len(order)} games in {time.perf_counter() - start:.0f} s -> {out_path.name}")
+    return {"games": order, "metrics": print_log_metrics(log_path)}
 
 
 def trial(n: int = 5, m: int = DEFAULT_M) -> None:
@@ -312,6 +415,15 @@ def main(argv=None):
                              "changes and timing, write nothing")
     parser.add_argument("--m", type=int, default=DEFAULT_M,
                         help=f"per-game drift tau = 0.1/M added before each fit (default {DEFAULT_M})")
+    parser.add_argument("--log", metavar="CSV",
+                        help=f"prediction log (--update default: {LOG_PATH.name}; required with --replay)")
+    parser.add_argument("--replay", action="store_true",
+                        help="season reset from --from + every game in applied_games.json, oldest first, "
+                             "into --out; never touches priors.json or applied_games.json")
+    parser.add_argument("--from", dest="from_path", metavar="PRIORS",
+                        help="with --replay: preseason priors to reset from (e.g. priors_pre_2026-27.json)")
+    parser.add_argument("--out", metavar="PRIORS",
+                        help="with --replay: where to write the replayed priors")
     args = parser.parse_args(argv)
 
     if args.n <= 0:
@@ -329,15 +441,31 @@ def main(argv=None):
             parser.error("--through must be a date like 2026-11-01")
     if (args.through or args.limit) and not args.update:
         parser.error("--through and --limit only work with --update")
-    if not (args.start_season or args.update or args.trial is not None):
-        parser.error("nothing to do: pass --start-season, --update or --trial")
+    if args.replay:
+        if args.start_season or args.update or args.trial is not None:
+            parser.error("--replay runs on its own (not with --start-season, --update or --trial)")
+        if not (args.from_path and args.out and args.log):
+            parser.error("--replay needs --from, --out and --log")
+    elif args.from_path or args.out:
+        parser.error("--from and --out only work with --replay")
+    elif args.log and not args.update:
+        parser.error("--log only works with --update or --replay")
+    if not (args.start_season or args.update or args.trial is not None or args.replay):
+        parser.error("nothing to do: pass --start-season, --update, --replay or --trial")
+
+    if args.replay:
+        try:
+            replay(args.from_path, args.out, args.log, n=args.n, m=args.m)
+        except ValueError as err:
+            parser.error(str(err))
+        return
 
     if args.start_season:
         start_season(args.n)
         print(f"Reset {len(NBA_TEAMS)} NBA teams to std = {season_std(args.n):.5f} (N={args.n}) "
               f"from {FROZEN_PRIORS_PATH.name} -> {PRIORS_PATH.name}; cleared {APPLIED_GAMES_PATH.name}")
     if args.update:
-        run_update(through=args.through, limit=args.limit, m=args.m)
+        run_update(through=args.through, limit=args.limit, m=args.m, log_path=args.log)
     if args.trial is not None:
         trial(args.trial, args.m)
 

@@ -23,16 +23,16 @@ def load_model(priors_path=None):
     return load_priors(path), path
 
 
-def predict_game(home_id: str, away_id: str, model: dict):
+def predict_game(home_id: str, away_id: str, model: dict, seed=None):
     """
     Returns:
         {"home_win_pct": float, "away_win_pct": float,
          "home_score": float, "away_score": float}
-    or None if either team isn't in the model.
+    or None if either team isn't in the model. `seed` makes the simulation reproducible.
     """
     if home_id not in model or away_id not in model:
         return None
-    r = simulate_factors(home_id, away_id, model)
+    r = simulate_factors(home_id, away_id, model, seed=seed)
     return {
         "home_win_pct": float(r["team_a_win_pct"]),
         "away_win_pct": float(r["team_b_win_pct"]),

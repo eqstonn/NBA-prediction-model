@@ -35,6 +35,9 @@ python code/update.py --update                           # apply every finished,
 python code/update.py --update --through 2026-11-01 --limit 20   # stop at a date / after N games
 python code/update.py --trial 5                          # DRY RUN: first 5 games of 2026-27 in memory; prints mean changes + timing, writes nothing
 python code/update.py --trial 5 --m 20                   # same with per-game drift tau = 0.1/20 (default M=30)
+python code/update.py --replay --from priors_pre_2026-27.json --out priors_2026-27_base.json --log log_base.csv
+                                                         # rebuild the season into another file; never touches priors.json/applied_games.json
+python code/compare.py log_base.csv log_other.csv        # side-by-side accuracy of 2+ prediction logs
 
 python -m pytest tests                                   # tests (~1 min; real PyMC fits + a fake NBA.com; never touch the real priors.json)
 ```
@@ -59,7 +62,7 @@ All code is in `code/` as flat scripts that import each other by bare module nam
 **In-season path:** `priors_pre_2026-27.json` (frozen) → `update.py` → `priors.json` + `applied_games.json`
 - `update.start_season(n)` reads only the frozen snapshot. For the 30 NBA teams (`schedule.NBA_TEAMS`) it keeps every mean and sets every std to `0.1/sqrt(n)`, so last season counts as `n` games of evidence. The 7 non-NBA teams are copied unchanged. It writes `priors.json` and resets `applied_games.json` to `{}`, which maps `game_id` → info for games already applied.
 - `update.write_json` writes atomically and raises `PermissionError` if pointed at the frozen snapshot. Route all writes through it.
-- `boxscores.py` is the 2026-27 data source (NBA.com via nba_api, not Kaggle). Its only network functions are `_download_game_log` and `_download_box_score`; tests replace both.
+- `boxscores.py` is the 2026-27 data source (NBA.com via nba_api, not Kaggle). Its only network functions are `_download_game_log`, `_download_schedule` and `_download_box_score`; tests replace all three (`tests/fake_nba.py`).
   - **Endpoints:** every request goes through nba_api to `https://stats.nba.com/stats/<endpoint>`: `leaguegamelog`, `scheduleleaguev2` and `boxscorefourfactorsv3`.
   - **Game list = game log ∪ schedule.** The game log is unreliable: on 2026-11-17/18 it listed 205, 204, 209 games and kept leaving out the final DEN @ IND game (`0022600189`, Nov 7, Mexico City). So `fetch_finished_games` also takes the `ScheduleLeagueV2` games with `gameStatus == 3`. `combine_game_lists` merges the two by gameId (the game log's details win) and prints a `WARNING:` for each game missing from either list or differing in date, teams or score. `run_update` returns these as `"disagreements"`.
   - **Which games:** from the game log, only the season types `"Regular Season"` and `"IST"` (NBA Cup) are requested, nothing else. Schedule games get their season type from the gameId and the NBA Cup label/subtype. `select_games` keeps game IDs starting `002` (regular season, which includes Cup group games, quarterfinals and semifinals) or `006` (Cup final, listed only under IST), played on or after `OPENING_NIGHT = 2026-10-20`, sorted by (date, gameId). Preseason is `001`/`"Pre Season"`, play-in `005`, playoffs `004`.
@@ -69,11 +72,15 @@ All code is in `code/` as flat scripts that import each other by bare module nam
 - `update.run_update(through, limit, m)` (`--update`) loads `applied_games.json`, skips games already in it, and applies the rest oldest first.
   - **Skipped games:** a game whose box score can't be downloaded or is incomplete is skipped and **not recorded**, so the next run retries it. It is then applied after later-dated games, slightly out of order.
   - **Crash-safe saving:** each game is saved with three atomic writes: `applied_games.json` gets the entry with `"pending": <fingerprint of new priors>`, then `priors.json`, then the pending mark is removed. `load_applied()` resolves a leftover pending entry by fingerprint (kept if `priors.json` has the game, dropped otherwise). A fit error aborts the run with nothing half-saved.
-  - **`applied_games.json` entries:** `{gameId: {"date", "matchup", "score", "nba_cup"}}`.
+  - **`applied_games.json` entries:** `{gameId: {"date", "matchup", "score", "nba_cup"}}`. Its key order is the order games were actually applied.
+  - **Seeded fits:** PyMC fits use `random_seed = update.fit_seed(gameId)` (the gameId as an int), so runs are reproducible. The first 210 games (through 2026-11-17) were applied before this, without seeds.
+- **Prediction log** (`predlog.py`): before a game is applied, `log_prediction` predicts it from the current priors with `predict.predict_game(..., seed=predlog.PREDICT_SEED)` and appends a row to `prediction_log.csv` (`--log` overrides). Columns: `date, game_id, home, away, predicted_winner, win_pct, proj_home, proj_away, actual_home, actual_away`; `win_pct` is the predicted winner's probability in percent. `append_rows` skips game_ids already in the file, so reruns never duplicate rows. Each run ends by printing the log's winner accuracy, spread MAE and Brier score (`predlog.metrics`). The log only covers games applied after this feature was added; `log_base.csv` from a replay covers the whole season.
+- **Replay** (`update.replay`, `--replay --from --out --log`): reset from `--from` (N via `--n`), then every game in `applied_games.json` sorted by (date, gameId), each predicted + logged before it is applied, from the box-score cache (no network if cached). It writes only `--out` (at the end) and `--log` (rebuilt from scratch), and refuses outputs that are `priors.json`, `applied_games.json`, `prediction_log.csv` or the `--from` file. Use it to test model changes on the same season, then `compare.py` the logs.
+- **`compare.py`** scores 2+ logs on the games present in every log and marks the best value per row with `*`.
 - Cost: about 3–5 s of fitting per game on AC power (2 fits, mostly PyTensor recompiling the model each time) plus ~0.9 s download, so a full season (1230 games) takes about 1.3–2 h. **On battery the laptop throttles badly** (5 → 18 s per game as the charge dropped), so run big updates plugged in.
 
 **Prediction path:** `priors.json` → `simulation.py` → `predict.py` → `build_site.py` (+ `schedule.py`)
-- `simulation.simulate_factors(team_a, team_b, priors)` does the following:
+- `simulation.simulate_factors(team_a, team_b, priors, seed=None)` does the following (`seed=None` = fresh randomness, as the website uses; an int = reproducible, as the prediction log uses):
   - draws each side's offense and defense factors, blends them `(o + d)/2`
   - adds game noise (σ 0.05 for eFG/ORB, 0.02 for TOV/FTR)
   - converts to points with `pace=100`, `ft_pct=0.77`, `possessions = pace·(1−TOV)·(1+ORB·(1−eFG))`, `points = possessions·(2·eFG + FTR·ft_pct)`
