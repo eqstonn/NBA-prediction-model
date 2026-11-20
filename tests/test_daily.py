@@ -14,6 +14,7 @@ import pytest
 import boxscores
 import build_site
 import daily
+import injuries
 import lines
 from fake_nba import EXPECTED, ID, REPO_ROOT, reference_priors, update
 
@@ -43,8 +44,13 @@ def denv(env, tmp_path, monkeypatch):
               "home": {"id": ID["NYK"], "abbr": "NYK", "name": "New York Knicks", "score": None},
               "away": {"id": ID["BOS"], "abbr": "BOS", "name": "Boston Celtics", "score": None}}]
     monkeypatch.setattr(build_site, "fetch_games", lambda start, days: (games, "test"))
+    monkeypatch.setattr(injuries, "update_report", lambda path=None, now=None: dict(FAKE_REPORT))
     env.logs = tmp_path / "logs"
     return env
+
+
+FAKE_REPORT = {"source": "TEST", "fetched_at": "2026-11-20T14:00:00Z", "updated": "", "entries": [],
+               "unmatched_teams": []}
 
 
 def fake_lines(calls, quota="470", fail=()):
@@ -264,16 +270,28 @@ def test_pregame_time_falls_back_to_6_pm():
     assert daily.pregame_plan(DAY, date(2026, 11, 22))["due"] is None            # no games
 
 
+class Calls(list):
+    """Odds API calls; .builds = the site rebuilds (the injury source each was given)."""
+
+
 @pytest.fixture
 def pregame(tmp_path, monkeypatch):
     """--pregame with DAY's schedule and a clock; returns (calls, set_clock, log_dir)."""
     monkeypatch.setenv(lines.KEY_ENV, "k")
     monkeypatch.setattr(daily, "current_schedule", lambda: DAY)
     monkeypatch.setattr(lines, "LINES_PATH", tmp_path / "data" / "lines.csv")
-    calls = []
+    calls = Calls()
     monkeypatch.setattr(lines, "fetch_lines", fake_lines(calls))
     clock = {}
     monkeypatch.setattr(daily, "_now", lambda: clock["now"].astimezone(timezone.utc))
+    builds = []
+    monkeypatch.setattr(injuries, "update_report", lambda path=None, now=None: dict(FAKE_REPORT))
+
+    def fake_site(argv, injury_report=None, injury_error=None):
+        builds.append(injury_report["source"] if injury_report else None)
+        return {"games": 4, "injury_warnings": 2, "injury_source": "TEST"}
+    monkeypatch.setattr(build_site, "main", fake_site)
+    calls.builds = builds
 
     def set_clock(hh, mm=0):
         clock["now"] = et(TODAY, hh, mm)
@@ -311,6 +329,53 @@ def test_failed_pregame_snapshot_is_retried_by_the_next_trigger(pregame, monkeyp
     assert "pregame_lines" not in daily.load_state(logs)
     set_clock(14, 20)
     assert daily.run(["--pregame"], log_dir=logs, waits=NO_WAITS) == daily.EXIT_OK and len(calls) == 4
+
+
+def test_pregame_refreshes_injuries_and_rebuilds_the_site_once(pregame, monkeypatch):
+    calls, set_clock, logs = pregame
+    set_clock(13, 0)
+    daily.run(["--pregame"], log_dir=logs, waits=NO_WAITS)
+    assert calls.builds == []                                           # not due: nothing
+    set_clock(14, 5)
+    assert daily.run(["--pregame"], log_dir=logs, waits=NO_WAITS) == daily.EXIT_OK
+    assert len(calls) == 1 and calls.builds == ["TEST"]                 # lines, then injuries + site
+    text = "".join(p.read_text(encoding="utf-8") for p in logs.glob("*.log"))
+    assert text.index("--- pregame lines") < text.index("--- injuries") < text.index("--- site")
+    assert "injury warnings: 2 key player(s) (TEST report)" in text
+    set_clock(16, 0)
+    daily.run(["--pregame"], log_dir=logs, waits=NO_WAITS)
+    assert len(calls) == 1 and calls.builds == ["TEST"]                 # once a day
+
+
+def test_failed_pregame_rebuild_is_retried_but_the_lines_are_not(pregame, monkeypatch):
+    calls, set_clock, logs = pregame
+    real_site = build_site.main
+    monkeypatch.setattr(build_site, "main", lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")))
+    set_clock(14, 5)
+    assert daily.run(["--pregame"], log_dir=logs, waits=NO_WAITS) == daily.EXIT_FAILED and len(calls) == 1
+    state = daily.load_state(logs)
+    assert state["pregame_lines"] == "2026-11-20" and "pregame_site" not in state
+    monkeypatch.setattr(build_site, "main", real_site)
+    set_clock(14, 20)
+    assert daily.run(["--pregame"], log_dir=logs, waits=NO_WAITS) == daily.EXIT_OK
+    assert len(calls) == 1 and calls.builds == ["TEST"]                 # only the rebuild ran again
+
+
+def test_injury_report_failure_is_a_warning_and_the_site_is_built_without_it(denv, monkeypatch):
+    tries = []
+
+    def down(path=None, now=None):
+        tries.append(1)
+        raise injuries.InjuryFetchError("no injury report: ESPN: down; CBS: down")
+    monkeypatch.setattr(injuries, "update_report", down)
+    assert daily.run([], log_dir=denv.logs, waits=NO_WAITS) == daily.EXIT_WARNINGS
+    assert len(tries) == 3                                              # retried like any step
+    page = (build_site.SITE_DIR / "index.html").read_text(encoding="utf-8")
+    assert "couldn't be fetched" in page and "⚠" not in page
+    meta = json.loads((build_site.SITE_DIR / "predictions.json").read_text(encoding="utf-8"))["injuries"]
+    assert meta["fetched_at"] is None and "ESPN: down" in meta["error"]
+    text = log_text(denv)
+    assert "injury report unavailable" in text and "injury warnings: none (no report)" in text
 
 
 def test_pregame_keeps_credits_for_the_mornings(pregame):

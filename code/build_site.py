@@ -10,8 +10,18 @@ Build the predictions website for this week's NBA games.
     python code/build_site.py --rest off --priors priors_2026-27_pace-home.json   # the previous live model
     python code/build_site.py --sigma-sim legacy --pace off --home off --rest off  # the Phase 6 simulation
     python code/build_site.py --sim-corr on                              # Phase 7 correlated factors
+    python code/build_site.py --injuries off                             # no injury report (Phase 12)
+    python code/build_site.py --key-top 3 --key-mpg 30                   # stricter "key player" rule
+    python code/build_site.py --seed 1                                   # reproducible win % (default: fresh draws)
 
 Writes site/index.html (open it in a browser) and site/predictions.json.
+
+Injury warnings (Phase 12, display only): the current injury report (injuries.py: ESPN, CBS as backup)
+is fetched, appended to data/injuries_2026-27.csv, and each game not yet final within --injury-days (2:
+today and tomorrow, US Eastern; statuses are about a team's next game) shows its KEY players (team top 5
+by minutes per game, or 25+ minutes) who are Out / Doubtful ("strong") or Questionable / Day-To-Day ("mild"). The predictions are made before and without it: annotate_injuries only adds a
+row["injuries"] key. If the report can't be fetched the site is built without warnings (with a note)
+and a WARNING is printed; it never stops the build.
 """
 import argparse
 import html
@@ -22,6 +32,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import boxscores
+import injuries
 import params
 import rest as rest_days
 from predict import REPO_ROOT, load_model, predict_game
@@ -34,9 +45,10 @@ EASTERN = ZoneInfo("America/New_York")
 def build_predictions(games, model, sim_sigma=None, sim_corr: str = params.DEFAULT_SIM_CORR_MODE,
                       pace: str = params.DEFAULT_PACE_MODE, home: str = params.DEFAULT_HOME_MODE,
                       rest: str = params.DEFAULT_REST_MODE, rest_lookup=None,
-                      calib: str = params.DEFAULT_CALIB_MODE, react: str = params.DEFAULT_REACT_MODE):
+                      calib: str = params.DEFAULT_CALIB_MODE, react: str = params.DEFAULT_REACT_MODE, seed=None):
     """
     sim_sigma: {factor: game noise} for the simulation; None = params.sim_sigma() (fitted by default).
+    seed: None = fresh draws (the default site), an int = the same win % on every build.
     sim_corr / pace / home / rest / calib: "on" or "off" (defaults in params.py, see simulation.py); a game
     with "neutral": True gets no home boost. rest="on" needs rest_lookup(team_id, date) -> rest
     info (rest.rest_lookup of the season's NBA.com schedule); each row then carries "rest".
@@ -51,7 +63,8 @@ def build_predictions(games, model, sim_sigma=None, sim_corr: str = params.DEFAU
     rows = []
     for g in games:
         days = {side: rest_lookup(g[side]["id"], g["date"])["rest"] for side in ("home", "away")} if with_rest else {}
-        pred = predict_game(g["home"]["id"], g["away"]["id"], model, sigma=sim_sigma, sim_corr=sim_corr, pace=pace,
+        pred = predict_game(g["home"]["id"], g["away"]["id"], model, seed=seed, sigma=sim_sigma, sim_corr=sim_corr,
+                            pace=pace,
                             home=home, neutral=g.get("neutral", False), rest=rest, rest_home=days.get("home"),
                             rest_away=days.get("away"), calib=calib, calib_temperature=temperature)
         row = dict(g, prediction=pred)
@@ -65,6 +78,66 @@ def build_predictions(games, model, sim_sigma=None, sim_corr: str = params.DEFAU
                 row["pick_correct"] = winner == row["pick"]
         rows.append(row)
     return rows
+
+
+INJURY_DAYS = 2   # warnings on games up to this many days from the report (today + tomorrow, US Eastern)
+
+
+def last_injury_day(fetched_at: str, days: int = INJURY_DAYS) -> str:
+    """The last game date (YYYY-MM-DD) that gets warnings from a report fetched at `fetched_at` (UTC)."""
+    t = datetime.fromisoformat(fetched_at.replace("Z", "+00:00")).astimezone(EASTERN).date()
+    return (t + timedelta(days=days - 1)).isoformat()
+
+
+def annotate_injuries(rows, warnings_by_team: dict, through=None) -> int:
+    """
+    Add row["injuries"] = {"home": [...], "away": [...]} (injuries.team_warnings entries) to every game that
+    isn't final, is on or before `through` (YYYY-MM-DD; None = every date) and has a warning: statuses like
+    "questionable for Friday's game" are about the next game, not next week's. Nothing else in the row changes.
+    Returns the number of warnings shown.
+    """
+    shown = 0
+    for row in rows:
+        if row.get("status") == "final" or (through is not None and row["date"] > through):
+            continue
+        found = {side: warnings_by_team.get(row[side]["id"], []) for side in ("home", "away")}
+        if any(found.values()):
+            row["injuries"] = found
+            shown += sum(len(w) for w in found.values())
+    return shown
+
+
+def render_injuries(row) -> str:
+    inj = row.get("injuries")
+    if not inj:
+        return ""
+    items = []
+    for side in ("away", "home"):
+        for w in inj.get(side, []):
+            items.append(f'<span class="inj {w["level"]}" title="{html.escape(w["player"])}, '
+                         f'{w["mpg"]:.1f} min/game, {html.escape(row[side]["abbr"])}">'
+                         f'⚠ {html.escape(w["last_name"] or w["player"])} ({html.escape(w["status"])})</span>')
+    return f'<div class="injuries">{"".join(items)}</div>' if items else ""
+
+
+def injury_note(meta: dict) -> str:
+    """The one line under the header: the disclaimer, the rule and when the report was fetched."""
+    base = "Predictions don't account for injuries."
+    if not meta.get("on"):
+        return f"{base} Injury warnings are off for this build."
+    if not meta.get("fetched_at"):
+        return f"{base} The injury report couldn't be fetched for this build, so no warnings are shown."
+    t = datetime.fromisoformat(meta["fetched_at"].replace("Z", "+00:00")).astimezone(EASTERN)
+    when = f"{t:%b} {t.day}, {t.hour % 12 or 12}:{t:%M %p} ET"
+    return (f"{base} ⚠ marks a key player (top {meta['key_top']} in minutes per game on his team, or "
+            f"{meta['key_mpg']:g}+ min) who is Out or Doubtful (red) or Questionable / day-to-day (amber), "
+            f"from the {html.escape(meta['source'])} injury report fetched {when}; shown for games through "
+            f"{_short_date(meta['through'])}.")
+
+
+def _short_date(day: str) -> str:
+    d = date.fromisoformat(day)
+    return f"{d:%a %b} {d.day}"
 
 
 def _team_line(team, win_pct, score, favored):
@@ -106,11 +179,11 @@ def render_card(row):
         <div class="meta"><span class="tip" data-utc="{tip}">{status}</span><span class="at">away @ home</span></div>
         {lines}
         <div class="bar"><div style="width:{bar:.1f}%"></div></div>
-        <div class="foot">{footer}</div>
+        <div class="foot">{footer}</div>{render_injuries(row)}
       </div>"""
 
 
-def render_page(rows, source, priors_path, start, end):
+def render_page(rows, source, priors_path, start, end, injury_line: str = ""):
     by_day = {}
     for r in rows:
         by_day.setdefault(r["date"], []).append(r)
@@ -168,18 +241,24 @@ def render_page(rows, source, priors_path, start, end):
   .card.final {{ opacity:.85; }}
   .empty {{ color:var(--muted); }}
   footer {{ max-width:1000px; margin:24px auto; padding:0 16px 24px; color:var(--muted); font-size:12px; }}
+  .note {{ color:var(--muted); font-size:13px; margin-top:6px; }}
+  .injuries {{ margin-top:8px; display:flex; flex-wrap:wrap; gap:4px 10px; font-size:12px; }}
+  .inj.strong {{ color:#b91c1c; font-weight:600; }}
+  .inj.mild {{ color:#b45309; }}
+  @media (prefers-color-scheme: dark) {{ .inj.strong {{ color:#f87171; }} .inj.mild {{ color:#fbbf24; }} }}
 </style>
 </head>
 <body>
 <header>
   <h1>NBA Predictions</h1>
   <div class="sub">{start:%b} {start.day} – {end:%b} {end.day}, {end.year} · {len(rows)} games{record}</div>
+  {f'<div class="note">{injury_line}</div>' if injury_line else ''}
 </header>
 <main>{''.join(sections)}</main>
 <footer>
   Win % from 10,000 Monte Carlo sims of each team's Four Factors (eFG%, TOV%, ORB%, FTR).
   Projected scores shown next to each team. Bar: orange = away, blue = home.
-  No home-court adjustment yet.<br>
+  Includes home court and rest (back-to-backs).<br>
   Schedule: {html.escape(source)} · Model: {html.escape(Path(priors_path).name)} · Updated {updated}
 </footer>
 <script>
@@ -221,11 +300,52 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--react", choices=params.SWITCH_MODES, default=params.DEFAULT_REACT_MODE,
                         help="the priors come from the --react on season procedure (Phase 10c); only picks the "
                              f"calibration temperature for --calib on (default {params.DEFAULT_REACT_MODE})")
+    parser.add_argument("--injuries", choices=params.SWITCH_MODES, default="on",
+                        help="fetch the injury report and show key-player warnings (display only; default on)")
+    parser.add_argument("--key-top", type=int, default=injuries.TOP_N,
+                        help=f"key player: his team's top N by minutes per game (default {injuries.TOP_N})")
+    parser.add_argument("--key-mpg", type=float, default=injuries.MIN_MPG,
+                        help=f"... or at least this many minutes per game (default {injuries.MIN_MPG:g})")
+    parser.add_argument("--injury-days", type=int, default=INJURY_DAYS,
+                        help=f"show warnings on games up to this many days from the report, today = 1 "
+                             f"(default {INJURY_DAYS}: today and tomorrow, US Eastern)")
+    parser.add_argument("--seed", type=int, help="simulation seed: the same win %% on every build (default: fresh draws)")
     return parser
 
 
-def main(argv=None):
+def injury_warnings(args, injury_report=None, injury_error=None):
+    """
+    (warnings by team, meta for the page). injury_report: an already fetched report (daily.py fetches it within
+    its retries); injury_error: the fetch already failed. Neither: fetch it now. Never raises.
+    """
+    meta = {"on": args.injuries == "on", "source": None, "fetched_at": None, "through": None, "error": None,
+            "key_top": args.key_top, "key_mpg": args.key_mpg}
+    if not meta["on"]:
+        return {}, meta
+    report = injury_report
+    if report is None and injury_error is None:
+        try:
+            report = injuries.update_report()
+        except Exception as err:   # noqa: BLE001 (display only: the site is built without warnings)
+            injury_error = f"{type(err).__name__}: {err}"
+    if report is None:
+        meta["error"] = injury_error
+        print(f"WARNING: no injury report ({injury_error}); building the site without injury warnings")
+        return {}, meta
+    meta.update(source=report["source"], fetched_at=report["fetched_at"],
+                through=last_injury_day(report["fetched_at"], args.injury_days))
+    try:
+        return injuries.team_warnings(report, injuries.season_minutes(), args.key_top, args.key_mpg), meta
+    except Exception as err:   # noqa: BLE001
+        meta.update(fetched_at=None, error=f"{type(err).__name__}: {err}")
+        print(f"WARNING: injury warnings failed ({meta['error']}); building the site without them")
+        return {}, meta
+
+
+def main(argv=None, injury_report=None, injury_error=None):
     args = make_parser().parse_args(argv)
+    if args.key_top < 0 or args.key_mpg < 0 or args.injury_days < 1:
+        raise SystemExit("--key-top and --key-mpg must not be negative, --injury-days must be at least 1")
 
     start = date.fromisoformat(args.start) if args.start else datetime.now(EASTERN).date()
     end = start + timedelta(days=args.days - 1)
@@ -235,22 +355,29 @@ def main(argv=None):
     lookup = rest_days.rest_lookup(boxscores.get_schedule(boxscores.SEASON)) if args.rest == "on" else None
     rows = build_predictions(games, model, sim_sigma=params.sim_sigma(args.sigma_sim), sim_corr=args.sim_corr,
                              pace=args.pace, home=args.home, rest=args.rest, rest_lookup=lookup, calib=args.calib,
-                             react=args.react)
+                             react=args.react, seed=args.seed)
+    # injuries come after the predictions and only add row["injuries"] (display only)
+    warnings_by_team, inj_meta = injury_warnings(args, injury_report, injury_error)
+    shown = annotate_injuries(rows, warnings_by_team, inj_meta["through"])
 
     SITE_DIR.mkdir(exist_ok=True)
     data = json.dumps(
         {"start": start.isoformat(), "end": end.isoformat(), "source": source,
          "model": Path(priors_path).name, "sigma_sim": args.sigma_sim, "sim_corr": args.sim_corr, "pace": args.pace,
          "home": args.home, "rest": args.rest, "calib": args.calib, "react": args.react,
-         "games": rows}, indent=2)
-    page = render_page(rows, source, priors_path, start, end)
+         "injuries": inj_meta, "games": rows}, indent=2)
+    page = render_page(rows, source, priors_path, start, end, injury_note(inj_meta))
     # each file is written whole (temp file + rename), so an interrupted run never leaves half a page
     for name, text in (("predictions.json", data), ("index.html", page)):
         tmp = SITE_DIR / f"{name}.tmp"
         tmp.write_text(text, encoding="utf-8")
         os.replace(tmp, SITE_DIR / name)
-    print(f"Wrote {len(rows)} games ({source}) to {SITE_DIR / 'index.html'}")
-    return {"games": len(rows), "source": source, "start": start.isoformat(), "end": end.isoformat()}
+    print(f"Wrote {len(rows)} games ({source}) to {SITE_DIR / 'index.html'}"
+          + (f"; {shown} key-player injury warning(s) ({inj_meta['source']})" if inj_meta["fetched_at"] else
+             "; no injury warnings"))
+    return {"games": len(rows), "source": source, "start": start.isoformat(), "end": end.isoformat(),
+            "injury_warnings": shown if inj_meta["fetched_at"] else None, "injury_source": inj_meta["source"],
+            "injury_error": inj_meta["error"]}
 
 
 if __name__ == "__main__":

@@ -17,13 +17,17 @@ Morning run (default), in order
               here), so a lines failure can't hold up the update and vice versa.
   2. lines    one Odds API snapshot of upcoming games (lines.fetch_lines = python code/lines.py): the
               morning line. Once per US Eastern day (state in logs/daily_state.json).
-  3. site     build_site.py for today + 6 days, from priors.json as it now is: if step 1 failed, the
-              site is still rebuilt from the current (unchanged) priors.
+  3. site     the injury report (injuries.update_report: ESPN, CBS as backup; appended to
+              data/injuries_2026-27.csv; retried like any step, display only), then build_site.py for
+              today + 6 days with its key-player warnings, from priors.json as it now is: if step 1
+              failed, the site is still rebuilt from the current (unchanged) priors; if the injury
+              report failed, it is built without warnings (a WARNING, not a failure).
 
 Pre-game run (--pregame)
 ------------------------
-Only step 2, once per Eastern day, for closing lines (lines.closing_line = the last snapshot before tip-off).
-The run time comes from that day's NBA.com schedule (the cached stats/schedules/2026-27.json; downloaded
+Step 2 for closing lines (lines.closing_line = the last snapshot before tip-off), then step 3 again (a fresh
+injury report and the site rebuilt, since injury news comes late in the day), each once per Eastern day;
+a step that failed is retried by the next trigger. The run time comes from that day's NBA.com schedule (the cached stats/schedules/2026-27.json; downloaded
 if missing): PREGAME_LEAD (1 hour) before the first tip-off, Eastern time; 6 PM ET when the schedule
 can't be read or has no tip-off times (TBD). The scheduled task fires every 15 minutes through the
 day; a run before that time exits at once ("not due"), the first run after it takes the snapshot
@@ -348,7 +352,7 @@ class Run:
         self.mode, self.log_dir, self.waits, self.force_lines = mode, Path(log_dir), tuple(waits), force_lines
         self.warnings, self.failed = [], []
         self.summary = {"mode": mode, "applied": None, "skipped_games": [], "lines_saved": None, "credits_left": None,
-                        "site_games": None}
+                        "site_games": None, "injury_warnings": None, "injury_source": None}
         self.state = load_state(self.log_dir)
         self.now = _now()
         self.today = self.now.astimezone(EASTERN).date()
@@ -431,45 +435,69 @@ class Run:
         return True
 
     def step_site(self) -> bool:
+        """The injury report (retried like any step; display only), then build_site with it, or without on failure."""
         import build_site
+        import injuries
+        print(f"\n--- injuries ({_stamp()}) ---")
+        ok, report = self.attempts("injuries", injuries.update_report)
+        error = None
+        if not ok:
+            error = f"{type(report).__name__}: {redact(report)}"
+            report = None
+            self.warn(f"injury report unavailable ({error}); the site is built without injury warnings")
         print(f"\n--- site ({_stamp()}) ---")
-        ok, result = self.attempts("site", lambda: build_site.main([]))
+        ok, result = self.attempts("site", lambda: build_site.main([], injury_report=report, injury_error=error))
         if not ok:
             self.failed.append("site")
             self.warn(f"site not rebuilt ({type(result).__name__}); the previous site/ stays")
             return False
-        self.summary["site_games"] = (result or {}).get("games")
+        result = result or {}
+        self.summary["site_games"] = result.get("games")
+        self.summary["injury_warnings"] = result.get("injury_warnings")
+        self.summary["injury_source"] = result.get("injury_source")
         return True
 
     def pregame(self):
-        """The pre-game snapshot if it's due (True when this run did something worth a summary)."""
-        if self.state.get("pregame_lines") == self.today.isoformat() and not self.force_lines:
-            print(f"pre-game lines already handled today ({self.today})")
+        """
+        When due: the pre-game lines snapshot, then the injury report + site rebuild (late injury news), each at
+        most once per Eastern day. True when this run did something worth a summary.
+        """
+        today = self.today.isoformat()
+        lines_done = self.state.get("pregame_lines") == today and not self.force_lines
+        site_done = self.state.get("pregame_site") == today and not self.force_lines
+        if lines_done and site_done:
+            print(f"pre-game run already done today ({self.today})")
             return False
         plan = pregame_plan(current_schedule(), self.today)
         now_et = self.now.astimezone(EASTERN)
         if plan["due"] is None:
             print(f"pre-game: no games on {self.today}; nothing to do")
-            self.state["pregame_lines"] = self.today.isoformat()
-            save_state(self.log_dir, self.state)
+            self.mark("pregame_lines", "pregame_site")
             return False
         if now_et < plan["due"]:
             print(f"pre-game: not due until {plan['due']:%H:%M} ET ({plan['why']}); nothing to do")
             return False
         if plan["last"] is not None and now_et >= plan["last"]:
-            self.warn(f"pre-game snapshot missed: every game on {self.today} has started (last tip-off "
-                      f"{plan['last']:%H:%M} ET); no request")
-            self.state["pregame_lines"] = self.today.isoformat()
-            save_state(self.log_dir, self.state)
+            self.warn(f"pre-game run missed: every game on {self.today} has started (last tip-off "
+                      f"{plan['last']:%H:%M} ET); no request, no rebuild")
+            self.mark("pregame_lines", "pregame_site")
             return True
         print(f"pre-game: due since {plan['due']:%H:%M} ET ({plan['why']}, {plan['games']} game(s))")
-        if not self.step_lines("pregame"):
-            self.failed.append("pregame lines")   # not marked handled: the next trigger tries again
-        elif self.state.get("pregame_lines") != self.today.isoformat():
-            # skipped for a reason that won't change today (no key, no credits): don't warn every 15 minutes
-            self.state["pregame_lines"] = self.today.isoformat()
-            save_state(self.log_dir, self.state)
+        if not lines_done:
+            if not self.step_lines("pregame"):
+                self.failed.append("pregame lines")   # not marked: the next trigger tries again
+            else:
+                # done, or skipped for a reason that won't change today (no key, no credits)
+                self.mark("pregame_lines")
+        if not site_done:
+            if self.step_site():
+                self.mark("pregame_site")             # a failed rebuild is retried by the next trigger
         return True
+
+    def mark(self, *keys):
+        for key in keys:
+            self.state[key] = self.today.isoformat()
+        save_state(self.log_dir, self.state)
 
     def morning(self):
         self.step_update()
@@ -508,8 +536,11 @@ def print_summary(run: Run, before: dict, after: dict, code: int) -> None:
         print(f"games applied: {applied}" + (f" ({len(s['skipped_games'])} skipped)" if s["skipped_games"] else ""))
     lines_saved = "none" if s["lines_saved"] is None else s["lines_saved"]
     print(f"lines saved: {lines_saved}" + (f"; Odds API credits left: {s['credits_left']}" if s["credits_left"] else ""))
-    if run.mode == "daily":
+    if s["site_games"] is not None or run.mode == "daily":
         print(f"site games: {'not rebuilt' if s['site_games'] is None else s['site_games']}")
+        if s["site_games"] is not None:
+            print("injury warnings: " + ("none (no report)" if s["injury_warnings"] is None else
+                                         f"{s['injury_warnings']} key player(s) ({s['injury_source']} report)"))
     print(f"warnings: {len(run.warnings)}")
     for w in run.warnings:
         print(f"  - {w}")
@@ -555,18 +586,19 @@ def dry_run(mode: str, log_dir, force_lines: bool = False) -> int:
         allowed, reason = odds_budget(state, "morning", today)
         print(f"  2. morning lines: " + ("already saved today, skip" if done else
                                          (f"1 request ({reason})" if allowed else f"skip: {reason}")))
-        print("  3. site: rebuild site/ for today + 6 days from priors.json")
+        print("  3. site: fetch the injury report (ESPN, CBS as backup) and rebuild site/ for today + 6 days "
+              "from priors.json")
     else:
         plan = pregame_plan(raw, today)
         when = "no games today" if plan["due"] is None else f"due at {plan['due']:%H:%M} ET ({plan['why']})"
-        done = state.get("pregame_lines") == today.isoformat() and not force_lines
+        done = (state.get("pregame_lines") == state.get("pregame_site") == today.isoformat()) and not force_lines
         allowed, reason = odds_budget(state, "pregame", today)
         now_et = now.astimezone(EASTERN)
         action = ("already handled today" if done else "nothing (no games)" if plan["due"] is None
                   else "nothing yet (not due)" if now_et < plan["due"]
                   else "skip: every game has started" if plan["last"] and now_et >= plan["last"]
                   else f"1 request ({reason})" if allowed else f"skip: {reason}")
-        print(f"  pre-game snapshot: {when}; now: {action}")
+        print(f"  pre-game snapshot + injury report + site rebuild: {when}; now: {action}")
     q = state.get("quota") or {}
     print(f"  Odds API credits left at the last count: {q.get('remaining', 'unknown')}"
           + (f" ({q.get('at')})" if q.get("at") else ""))

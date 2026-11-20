@@ -22,6 +22,16 @@ def no_real_betting_lines(tmp_path, monkeypatch):
 
     monkeypatch.setattr(lines, "_download_odds", refuse)
 
+    # the injury sources (Phase 12) likewise: never fetched, never written to data/
+    import injuries
+
+    def refuse_injuries():
+        raise ConnectionError("tests must never fetch the injury report")
+
+    monkeypatch.setattr(injuries, "_download_espn", refuse_injuries)
+    monkeypatch.setattr(injuries, "_download_cbs", refuse_injuries)
+    monkeypatch.setattr(injuries, "INJURIES_PATH", tmp_path / "injuries" / "injuries.csv")
+
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):

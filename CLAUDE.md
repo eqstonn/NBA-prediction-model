@@ -41,6 +41,8 @@ python code/daily.py                                     # Phase 11 daily run: -
 python code/daily.py --pregame                           # closing-line snapshot if due (1 h before the first tip-off ET, else 6 PM ET); once a day
 python code/daily.py --dry-run                           # what a run would do now, local files only (add --pregame for that mode); writes nothing
 powershell -ExecutionPolicy Bypass -File scripts\install_tasks.ps1     # register the two Task Scheduler tasks (the user runs it; uninstall_tasks.ps1 removes them)
+python code/injuries.py                                  # Phase 12: fetch the injury report (ESPN, CBS backup) -> data/injuries_2026-27.csv (gitignored) + key players
+python code/build_site.py --injuries off                 # site without injury warnings; --key-top 5 --key-mpg 25 --injury-days 2 are the defaults; --seed N = same win % every build
 python code/lines.py                                     # one betting-lines snapshot of upcoming games -> data/lines_2026-27.csv (1 Odds API request)
 python code/lines.py --closing                           # print each finished game's closing line (no request)
 python code/historical_lines.py                          # match stats/betting/nba_2008-2026.csv (Kaggle) to the training games; --out to save
@@ -214,8 +216,8 @@ All code is in `code/` as flat scripts that import each other by bare module nam
 - **Morning (default), in order:**
   1. `update.run_update(lines="off")`, which is `--update`.
   2. One morning `lines.fetch_lines` snapshot. It is taken here, not inside the update, so a failure in one never blocks the other.
-  3. `build_site.main([])`. It still runs if step 1 failed, from the unchanged priors.
-- **`--pregame`:** only a lines snapshot, at most once per Eastern day.
+  3. The site step: `injuries.update_report` (retried like any step; a failure is a WARNING, and the site is built without warnings), then `build_site.main([], injury_report=..., injury_error=...)`. It still runs if step 1 failed, from the unchanged priors.
+- **`--pregame`:** a lines snapshot, then the site step again (fresh injury report + rebuild: late injury news). Each is done at most once per Eastern day (state `pregame_lines` / `pregame_site`), and a failed one is retried by the next trigger.
   - Due 1 h before the day's first known tip-off (`pregame_plan`, from the cached `stats/schedules/2026-27.json`). TBD times (midnight ET / "TBD") and postponed games are ignored; 6 PM ET if there is no schedule or no time.
   - The task fires every 15 min from 10:00 local for 14 h. Runs before the due time exit at once ("not due"); the first run after it takes the snapshot, so it catches up after sleep.
   - No request on days without games or once every game has started.
@@ -238,6 +240,30 @@ All code is in `code/` as flat scripts that import each other by bare module nam
   - Both use `venv\Scripts\pythonw.exe` (no console; `Tee` handles `sys.stdout` being None), working directory = repo.
   - Settings: StartWhenAvailable (catch-up), run on battery, MultipleInstances IgnoreNew, Interactive logon (no admin, no stored password). `-WhenLoggedOff` = S4U, which needs an elevated shell.
 - **Related changes:** `build_site.main` now returns `{"games", "source", "start", "end"}` and writes `site/` files atomically.
+
+**Injury warnings (Phase 12; DISPLAY ONLY: the model, predictions, priors and logs never read them):**
+- **`injuries.py`, sources** (free, no key; only `_download_espn` / `_download_cbs` go online, and conftest's autouse fixture refuses both and points `INJURIES_PATH` at a temp folder):
+  - **ESPN** `site.api.espn.com/.../nba/injuries` (JSON) first. ESPN's status is only Out / Day-To-Day, so a Day-To-Day player's game status is read from its note ("is questionable for Friday's game" → Questionable; doubtful; probable / expected to play / available; ruled out / is out for).
+  - **Stale notes:** a note naming a weekday is ignored if the nearest such weekday to the note's date (±3 days; ESPN's `date` is the last update, which can be the day after the game) is before the fetch date, so the status stays Day-To-Day.
+  - **CBS** `cbssports.com/nba/injuries/` (HTML, stdlib parser) is the backup: "Game Time Decision" → Questionable, "Expected to be out…" / "Out for the season" → Out.
+  - Both fail or are empty → `InjuryFetchError`.
+  - NBA.com's official report is a PDF that pypdf can't extract cleanly (checked), so it isn't used.
+- **Matching:** teams by name (`team_id_for`, plus the "LA Clippers" alias); unmatched teams are printed and kept with an empty team_id. Players by `norm_name` (accents, punctuation and Jr./III dropped): within the team first, then league-wide if the name is unique.
+- **CSV:** every fetch is appended to `data/injuries_2026-27.csv` (`FIELDS`, with `fetched_at`; `lines.append_rows`, never rewritten). It is **gitignored**, because ESPN's / CBS's terms don't allow republishing.
+- **Key players:** minutes per game this season from the cached NBA.com advanced box scores (`stats/boxscores_advanced/`, player `minutes`; no extra request). The team is the one of the player's latest game (dates from `applied_games.json`).
+  - Key = team top `TOP_N`=5 by mpg, or `MIN_MPG`=25+ (`key_players`; `build_site --key-top / --key-mpg`).
+  - Players with no minutes this season are never key (their absence is already in the ratings).
+  - Check (2026-11-19): 471 players, 162 key.
+- **Levels:** strong = Out, Doubtful; mild = Questionable, plain Day-To-Day; Probable = none.
+- **Site** (`build_site.py`):
+  - **Order:** `build_predictions` first; then `injury_warnings` (fetch unless daily passed `injury_report` / `injury_error`; never raises) and `annotate_injuries`, which only adds `row["injuries"]`.
+  - **Which games:** not final, and within `--injury-days` (2 = today + tomorrow ET; statuses are about the next game).
+  - **Cards** show "⚠ Tatum (Out)" (red strong / amber mild). One note line under the header: "Predictions don't account for injuries…", the rule, the source and fetch time (ET).
+  - **Fetch failure:** a note plus a printed WARNING, never a crash.
+  - **`predictions.json`** gets `"injuries"` meta. `--injuries off`, `--seed N` (reproducible win %).
+- **Check:** real build, `--seed 1`, injuries off vs on, 48 games: every prediction identical, rows differ only by the `injuries` key. Also covered by `test_predictions_identical_with_and_without_warnings`.
+- **daily.py:** the morning site step = injuries + site within the step retries. `--pregame` also refreshes injuries and rebuilds the site (above). The summary prints the warnings count.
+- Also fixed the site footer, which said "No home-court adjustment yet" (home and rest have been live since Phases 8 and 9).
 
 **Prediction path:** `priors.json` → `simulation.py` → `predict.py` → `build_site.py` (+ `schedule.py`)
 - `simulation.simulate_factors(team_a, team_b, priors, seed=None, sigma=None, sim_corr="off", pace="on", home="on", neutral=False, rest="on", rest_a=None, rest_b=None)` does the following (`seed=None` = fresh randomness, as the website uses; an int = reproducible, as the prediction log uses; `sigma=None` = `params.sim_sigma()`, fitted by default). With the defaults it needs team paces in the priors and both teams' rest (`"b2b"`, `"1"`, `"2+"`); the quick CLI sim (`python code/simulation.py`) has no dates and passes `"2+"` for both, which adds nothing.

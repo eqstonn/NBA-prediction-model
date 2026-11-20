@@ -15,3 +15,5 @@ venv/
 site/
 # Daily run logs, lock and state (code/daily.py)
 logs/
+# Injury reports (code/injuries.py): ESPN's / CBS's terms don't allow republishing them, so they stay local
+data/injuries_*.csv
