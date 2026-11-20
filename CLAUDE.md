@@ -37,6 +37,10 @@ python code/update.py --start-season --from priors_pre_2026-27.json --pace off  
 python code/update.py --update                           # apply every finished, not-yet-applied 2026-27 game (saves after each game)
 python code/update.py --update --through 2026-11-01 --limit 20   # stop at a date / after N games
 python code/update.py --update --lines off               # same without saving betting lines (default on; needs $env:ODDS_API_KEY)
+python code/daily.py                                     # Phase 11 daily run: --update (live defaults) + morning lines + build_site (log: logs/daily_YYYY-MM-DD.log)
+python code/daily.py --pregame                           # closing-line snapshot if due (1 h before the first tip-off ET, else 6 PM ET); once a day
+python code/daily.py --dry-run                           # what a run would do now, local files only (add --pregame for that mode); writes nothing
+powershell -ExecutionPolicy Bypass -File scripts\install_tasks.ps1     # register the two Task Scheduler tasks (the user runs it; uninstall_tasks.ps1 removes them)
 python code/lines.py                                     # one betting-lines snapshot of upcoming games -> data/lines_2026-27.csv (1 Odds API request)
 python code/lines.py --closing                           # print each finished game's closing line (no request)
 python code/historical_lines.py                          # match stats/betting/nba_2008-2026.csv (Kaggle) to the training games; --out to save
@@ -205,6 +209,35 @@ All code is in `code/` as flat scripts that import each other by bare module nam
 - **Samples:** training MAIN = `backtest.py`, the live in-season procedure on 2024-25 and 2025-26 (2,638 games): per season, preseason priors from `dynamic_model.train_priors` (the live recipe, in memory; `run_training` = it + the file write) on the 3 years before Oct 3 of that season, `update.reset_priors` (N = 20), then each game `predict.predict_game` (log seed) before `update.apply_game` (M = 30). Games from the Kaggle CSV incl. playoffs / play-in; neutral and rest flags from NBA.com schedules (2021-22 and 2022-23 are cached too now). The Kaggle file has no `gameType` for 2021-22, so 2024-25's priors use 2022-23 + 2023-24 only. Training SECONDARY = `train_calibration.run_pass(..., with_ids=True)`'s live variant (2,636 games: the training pass, tau = 0, no reset, first season burn-in). 2026-27 = `log_pace-home-rest.csv` then `prediction_log.csv` (first wins), with closing lines only where a snapshot precedes tip-off (0 games on 2026-11-19; grows as lines are saved).
 - **Result (2026-11-19):** live-procedure backtest 66.5% / Brier 0.2135 vs Vegas 68.9% / 0.1994 (+0.0140, 7.3 SE; Vegas better on every metric); vs home +11.4 pts / −0.034; vs better record −0.013 Brier (6.0 SE), +1.3 pts on winners (1.5 SE, level). The model is underconfident there (confidence 62.5% vs accuracy 66.5%). Live procedure − training pass: −0.0120 Brier (8.1 SE), +4.0 pts. Training pass alone: 62.5% / 0.2255 (it trails the better record on winners). 2026-27 (210 games, no Vegas yet): 67.6% / 0.2110, better record 65.7% (+0.5 SE).
 - Resume bullets are generated from the numbers with a 2-SE rule (`verdict`): "beat" / "trailed" only at |z| ≥ 2, "close to Vegas" only when the Brier difference is within noise.
+
+**Daily automatic run (Phase 11):** `code/daily.py`, run by Windows Task Scheduler (`scripts/install_tasks.ps1`, which the user runs; `scripts/uninstall_tasks.ps1`). It only schedules existing steps with the live defaults and never commits.
+- **Morning (default), in order:**
+  1. `update.run_update(lines="off")`, which is `--update`.
+  2. One morning `lines.fetch_lines` snapshot. It is taken here, not inside the update, so a failure in one never blocks the other.
+  3. `build_site.main([])`. It still runs if step 1 failed, from the unchanged priors.
+- **`--pregame`:** only a lines snapshot, at most once per Eastern day.
+  - Due 1 h before the day's first known tip-off (`pregame_plan`, from the cached `stats/schedules/2026-27.json`). TBD times (midnight ET / "TBD") and postponed games are ignored; 6 PM ET if there is no schedule or no time.
+  - The task fires every 15 min from 10:00 local for 14 h. Runs before the due time exit at once ("not due"); the first run after it takes the snapshot, so it catches up after sleep.
+  - No request on days without games or once every game has started.
+  - A failed request is not marked done, so the next trigger retries it.
+- **Safety:**
+  - **Lock:** an OS lock on `logs/daily.lock` (msvcrt / flock, released when the process dies). A second run exits 4.
+  - **Retries:** each step gets 3 attempts, 60 s then 180 s apart (`STEP_WAITS`), on top of boxscores' per-request retries. The Odds API is retried only on no response / 429 / 5xx (`lines.OddsAPIError.status` / `.retryable`), never on 401 / no credits. After the last attempt the step is skipped with a WARNING.
+  - **Priors:** `priors.json` / `applied_games.json` are only written by run_update's crash-safe save, so a failure keeps exactly the games applied before it. A listing failure writes nothing.
+  - **Log:** everything printed is also appended to `logs/daily_YYYY-MM-DD.log` (local date). `logs/` is gitignored and holds the log, the lock and `daily_state.json`.
+- **Exit codes:** 0 OK; 1 warnings (no key, lines failed or skipped, games skipped); 2 argparse; 3 a step failed after its retries (update, site, or the pre-game snapshot); 4 locked.
+- **Odds API credits:**
+  - At most one morning and one pre-game snapshot per Eastern day: 6 credits/day, ≤ 186/month of the free 500. `--force-lines` allows another snapshot the same day.
+  - The last x-requests-remaining count is kept in `daily_state.json` and printed.
+  - Under 3 credits (counted today): skip. A count from an earlier day or month still gets one try.
+  - A pre-game snapshot is skipped if it would leave fewer than 3 credits for each remaining day's morning snapshot.
+- **ODDS_API_KEY:** read from the environment, else from `HKCU\Environment` (`_registry_key`; the tests patch it to None). It is never printed or stored.
+- **Summary:** games applied / skipped, lines saved, credits left, site games, warnings, and a `git add` line listing only the tracked data files the run changed (`priors.json`, `applied_games.json`, `prediction_log.csv`, `data/lines_*.csv`).
+- **`--dry-run`:** reads only local files (cached schedule, `applied_games.json`, state) and prints the plan. No network, no log, no lock file, writes nothing (tested, and checked on the real repo and under pythonw).
+- **Tasks:**
+  - Both use `venv\Scripts\pythonw.exe` (no console; `Tee` handles `sys.stdout` being None), working directory = repo.
+  - Settings: StartWhenAvailable (catch-up), run on battery, MultipleInstances IgnoreNew, Interactive logon (no admin, no stored password). `-WhenLoggedOff` = S4U, which needs an elevated shell.
+- **Related changes:** `build_site.main` now returns `{"games", "source", "start", "end"}` and writes `site/` files atomically.
 
 **Prediction path:** `priors.json` → `simulation.py` → `predict.py` → `build_site.py` (+ `schedule.py`)
 - `simulation.simulate_factors(team_a, team_b, priors, seed=None, sigma=None, sim_corr="off", pace="on", home="on", neutral=False, rest="on", rest_a=None, rest_b=None)` does the following (`seed=None` = fresh randomness, as the website uses; an int = reproducible, as the prediction log uses; `sigma=None` = `params.sim_sigma()`, fitted by default). With the defaults it needs team paces in the priors and both teams' rest (`"b2b"`, `"1"`, `"2+"`); the quick CLI sim (`python code/simulation.py`) has no dates and passes `"2+"` for both, which adds nothing.

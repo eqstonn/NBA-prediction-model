@@ -13,3 +13,5 @@ __pycache__/
 venv/
 # Generated website (rebuild with: python code/build_site.py)
 site/
+# Daily run logs, lock and state (code/daily.py)
+logs/

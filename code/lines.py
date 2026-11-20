@@ -108,7 +108,16 @@ class MissingKeyError(RuntimeError):
 
 
 class OddsAPIError(RuntimeError):
-    """The Odds API request failed (the message never contains the key)."""
+    """The Odds API request failed (the message never contains the key). status: the HTTP status, None = no response."""
+
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.status = status
+
+    @property
+    def retryable(self) -> bool:
+        """Worth another try: no response, rate limited (429) or a server error (5xx); never a bad key / no credits."""
+        return self.status is None or self.status == 429 or self.status >= 500
 
 
 def api_key():
@@ -142,7 +151,8 @@ def _download_odds(key: str):
             message = resp.json().get("message", "")
         except ValueError:
             message = resp.text[:200]
-        raise OddsAPIError(f"HTTP {resp.status_code}: {redact(message, key)} (requests left: {quota['remaining']})")
+        raise OddsAPIError(f"HTTP {resp.status_code}: {redact(message, key)} (requests left: {quota['remaining']})",
+                           status=resp.status_code)
     return resp.json(), quota
 
 

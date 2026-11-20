@@ -16,6 +16,7 @@ Writes site/index.html (open it in a browser) and site/predictions.json.
 import argparse
 import html
 import json
+import os
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -237,13 +238,19 @@ def main(argv=None):
                              react=args.react)
 
     SITE_DIR.mkdir(exist_ok=True)
-    (SITE_DIR / "predictions.json").write_text(json.dumps(
+    data = json.dumps(
         {"start": start.isoformat(), "end": end.isoformat(), "source": source,
          "model": Path(priors_path).name, "sigma_sim": args.sigma_sim, "sim_corr": args.sim_corr, "pace": args.pace,
          "home": args.home, "rest": args.rest, "calib": args.calib, "react": args.react,
-         "games": rows}, indent=2), encoding="utf-8")
-    (SITE_DIR / "index.html").write_text(render_page(rows, source, priors_path, start, end), encoding="utf-8")
+         "games": rows}, indent=2)
+    page = render_page(rows, source, priors_path, start, end)
+    # each file is written whole (temp file + rename), so an interrupted run never leaves half a page
+    for name, text in (("predictions.json", data), ("index.html", page)):
+        tmp = SITE_DIR / f"{name}.tmp"
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, SITE_DIR / name)
     print(f"Wrote {len(rows)} games ({source}) to {SITE_DIR / 'index.html'}")
+    return {"games": len(rows), "source": source, "start": start.isoformat(), "end": end.isoformat()}
 
 
 if __name__ == "__main__":
