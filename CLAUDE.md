@@ -265,6 +265,22 @@ All code is in `code/` as flat scripts that import each other by bare module nam
 - **daily.py:** the morning site step = injuries + site within the step retries. `--pregame` also refreshes injuries and rebuilds the site (above). The summary prints the warnings count.
 - Also fixed the site footer, which said "No home-court adjustment yet" (home and rest have been live since Phases 8 and 9).
 
+**Track record on the site (Phase 13; DISPLAY ONLY: reads logs / lines / the report, writes nothing):**
+- **Data:** `track_record.build(today)` (`code/track_record.py`; no import of report.py, which pulls in the training stack).
+  - **Logs:** the live prediction logs `LIVE_LOGS` (= `report.LIVE_LOGS`, tested): `log_pace-home-rest.csv` then `prediction_log.csv` (appended by `--update` before each game is applied). The first log wins on a duplicate.
+  - **Scoring as report.py does:** a 50/50 pick counts half; Brier = mean (P(home) − home won)²; confidence = mean P of the pick.
+  - **Contents:** the season (games, right, accuracy, Brier, confidence), the last 7 days up to `today` (ET), the 10 most recent games, the backtest headline and Vegas this season.
+- **Backtest headline:** `parse_backtest` reads the first table after `## Training seasons, main` in `reports/accuracy_report.md` (Model / Vegas (spread) / Home team: games, winner accuracy, Brier), plus "Generated" and "SD = **13.83 points**". Regenerating the report updates the site; an unreadable report → None (the section leaves it out).
+- **Vegas this season:** only logged games with a closing line (`lines.closing_lines`: the last snapshot before tip-off), P = Φ(−spread_home / SD) as report.py's "Vegas (spread)". Shown with the game count once there is at least one.
+- **Site:** `build_site.render_track_record` adds a "How accurate is it?" section after the games:
+  - stat tiles (winners picked "x of N games", Brier, average confidence vs % right, last 7 days W–L with % and games);
+  - the one-line Brier explanation (`BRIER_LINE`);
+  - the backtest sentence and the Vegas sentence, with game counts next to every %;
+  - the recent-results table (date, game, pick + win %, final, ✓ right / ✗ wrong).
+  - `predictions.json` gets `"track_record"`. Built after the predictions (`track_record_for` never raises; a failure shows a note), so the predictions can't change: a real same-seed build with and without it gave identical rows for all 44 games, and a test checks the same.
+- **Check (2026-11-20):** 210 games, 67.6% (142 of 210), Brier 0.211, confidence 62.5%, last 7 days 20–7. These are the report's 2026-27 numbers. Backtest 66.5% / Vegas 68.9% / home 55.0% on 2,638 games. No logged game has a closing line yet, so no Vegas line on the site.
+- **Rebuilds:** with every site build, so with the daily run (morning, after `--update` logs the new games) and the pre-game rebuild.
+
 **Prediction path:** `priors.json` → `simulation.py` → `predict.py` → `build_site.py` (+ `schedule.py`)
 - `simulation.simulate_factors(team_a, team_b, priors, seed=None, sigma=None, sim_corr="off", pace="on", home="on", neutral=False, rest="on", rest_a=None, rest_b=None)` does the following (`seed=None` = fresh randomness, as the website uses; an int = reproducible, as the prediction log uses; `sigma=None` = `params.sim_sigma()`, fitted by default). With the defaults it needs team paces in the priors and both teams' rest (`"b2b"`, `"1"`, `"2+"`); the quick CLI sim (`python code/simulation.py`) has no dates and passes `"2+"` for both, which adds nothing.
   - draws each side's offense and defense factors, blends them `(o + d)/2`

@@ -22,6 +22,10 @@ today and tomorrow, US Eastern; statuses are about a team's next game) shows its
 by minutes per game, or 25+ minutes) who are Out / Doubtful ("strong") or Questionable / Day-To-Day ("mild"). The predictions are made before and without it: annotate_injuries only adds a
 row["injuries"] key. If the report can't be fetched the site is built without warnings (with a note)
 and a WARNING is printed; it never stops the build.
+
+Track record (Phase 13, display only): a "How accurate is it?" section after the games (track_record.py:
+this season from the live prediction logs, last 7 days, recent results, the backtest headline from
+reports/accuracy_report.md, model vs Vegas on games with a closing line), also built after the predictions.
 """
 import argparse
 import html
@@ -35,6 +39,7 @@ import boxscores
 import injuries
 import params
 import rest as rest_days
+import track_record
 from predict import REPO_ROOT, load_model, predict_game
 from schedule import fetch_games
 
@@ -183,7 +188,84 @@ def render_card(row):
       </div>"""
 
 
-def render_page(rows, source, priors_path, start, end, injury_line: str = ""):
+def _pct(x) -> str:
+    return f"{100 * x:.1f}%"
+
+
+def _games(n: int) -> str:
+    return f"{n:,} game{'s' if n != 1 else ''}"
+
+
+def _day(iso: str) -> str:
+    d = date.fromisoformat(iso)
+    return f"{d:%b} {d.day}"
+
+
+def _wins(x: float) -> str:
+    return f"{x:g}" if x != int(x) else f"{int(x)}"
+
+
+BRIER_LINE = ("Brier score = the average of (predicted win chance − result)², with result 1 for a win and 0 for a "
+              "loss: 0 is perfect, always saying 50% scores 0.250, lower is better.")
+
+
+def render_track_record(tr) -> str:
+    """The "How accurate is it?" section (track_record.build's result); a short note if there is none."""
+    if tr is None:
+        return ('<section class="record"><h2>How accurate is it?</h2>'
+                "<p class=\"note\">The track record couldn't be read for this build.</p></section>")
+    s, w = tr["season"], tr["last7"]
+    parts = ['<section class="record"><h2>How accurate is it?</h2>']
+    if s["games"]:
+        parts.append(f'<p class="lead">This season ({_day(tr["first"])} – {_day(tr["last"])}), every game predicted '
+                     f'before it was played:</p><div class="stats">'
+                     f'<div class="stat"><b>{_pct(s["accuracy"])}</b><span>winners picked<br>'
+                     f'{_wins(s["right"])} of {_games(s["games"])}</span></div>'
+                     f'<div class="stat"><b>{s["brier"]:.3f}</b><span>Brier score<br>{_games(s["games"])}</span></div>'
+                     f'<div class="stat"><b>{_pct(s["confidence"])}</b><span>average confidence in its pick<br>'
+                     f'vs {_pct(s["accuracy"])} of picks right ({_games(s["games"])})</span></div>')
+        if w["games"]:
+            wins, losses = w["right"], w["games"] - w["right"]
+            parts.append(f'<div class="stat"><b>{_wins(wins)}–{_wins(losses)}</b><span>last 7 days '
+                         f'({_day(tr["since"])} – {_day(tr["today"])})<br>{_pct(w["accuracy"])} of '
+                         f'{_games(w["games"])}</span></div>')
+        else:
+            parts.append(f'<div class="stat"><b>–</b><span>last 7 days ({_day(tr["since"])} – '
+                         f'{_day(tr["today"])})<br>no games logged yet</span></div>')
+        parts.append("</div>")
+    else:
+        parts.append('<p class="lead">No games of this season have been predicted and played yet.</p>')
+    parts.append(f'<p class="note">{BRIER_LINE}</p>')
+
+    b = tr.get("backtest")
+    if b:
+        m, v, h = b["rows"]["Model"], b["rows"]["Vegas (spread)"], b["rows"]["Home team"]
+        parts.append(f'<p>Past seasons, for context (a backtest of 2024-25 and 2025-26 run the way the model runs '
+                     f'live): it picked <b>{_pct(m["accuracy"])}</b> of winners over {_games(m["games"])}, vs '
+                     f'{_pct(v["accuracy"])} for the Vegas closing lines ({_games(v["games"])}) and '
+                     f'{_pct(h["accuracy"])} for always picking the home team ({_games(h["games"])}).</p>')
+    vg = tr.get("vegas")
+    if vg:
+        mo, ve = vg["model"], vg["vegas"]
+        parts.append(f'<p>This season against Vegas, on the {_games(vg["games"])} with a saved closing line: model '
+                     f'{_pct(mo["accuracy"])} of winners (Brier {mo["brier"]:.3f}), Vegas {_pct(ve["accuracy"])} '
+                     f'(Brier {ve["brier"]:.3f}), both on the same {_games(vg["games"])}.</p>')
+    if tr["recent"]:
+        rows = []
+        for g in tr["recent"]:
+            mark = '<span class="ok">✓ right</span>' if g["right"] else '<span class="bad">✗ wrong</span>'
+            rows.append(f'<tr><td>{_day(g["date"])}</td><td>{html.escape(g["away"])} @ {html.escape(g["home"])}</td>'
+                        f'<td>{html.escape(g["pick"])} {g["pick_pct"]:.0f}%</td>'
+                        f'<td>{html.escape(g["away"])} {g["away_pts"]} – {html.escape(g["home"])} {g["home_pts"]}</td>'
+                        f'<td>{mark}</td></tr>')
+        parts.append(f'<h3>Most recent {_games(len(tr["recent"]))}</h3><div class="tablewrap"><table class="recent">'
+                     '<thead><tr><th>Date</th><th>Game</th><th>Pick (win %)</th><th>Final</th><th></th></tr></thead>'
+                     f'<tbody>{"".join(rows)}</tbody></table></div>')
+    parts.append("</section>")
+    return "".join(parts)
+
+
+def render_page(rows, source, priors_path, start, end, injury_line: str = "", record_html: str = ""):
     by_day = {}
     for r in rows:
         by_day.setdefault(r["date"], []).append(r)
@@ -242,6 +324,18 @@ def render_page(rows, source, priors_path, start, end, injury_line: str = ""):
   .empty {{ color:var(--muted); }}
   footer {{ max-width:1000px; margin:24px auto; padding:0 16px 24px; color:var(--muted); font-size:12px; }}
   .note {{ color:var(--muted); font-size:13px; margin-top:6px; }}
+  .record {{ margin-top:32px; }}
+  .record h3 {{ font-size:15px; margin:18px 0 8px; }}
+  .stats {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:10px; margin:10px 0; }}
+  .stat {{ background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 12px; }}
+  .stat b {{ display:block; font-size:22px; font-variant-numeric:tabular-nums; }}
+  .stat span {{ color:var(--muted); font-size:12px; }}
+  .tablewrap {{ overflow-x:auto; }}
+  table.recent {{ border-collapse:collapse; width:100%; font-size:13px; background:var(--card); }}
+  table.recent th, table.recent td {{ text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); white-space:nowrap; }}
+  table.recent th {{ color:var(--muted); font-weight:600; }}
+  .ok {{ color:#15803d; }} .bad {{ color:#b91c1c; }}
+  @media (prefers-color-scheme: dark) {{ .ok {{ color:#4ade80; }} .bad {{ color:#f87171; }} }}
   .injuries {{ margin-top:8px; display:flex; flex-wrap:wrap; gap:4px 10px; font-size:12px; }}
   .inj.strong {{ color:#b91c1c; font-weight:600; }}
   .inj.mild {{ color:#b45309; }}
@@ -254,7 +348,7 @@ def render_page(rows, source, priors_path, start, end, injury_line: str = ""):
   <div class="sub">{start:%b} {start.day} – {end:%b} {end.day}, {end.year} · {len(rows)} games{record}</div>
   {f'<div class="note">{injury_line}</div>' if injury_line else ''}
 </header>
-<main>{''.join(sections)}</main>
+<main>{''.join(sections)}{record_html}</main>
 <footer>
   Win % from 10,000 Monte Carlo sims of each team's Four Factors (eFG%, TOV%, ORB%, FTR).
   Projected scores shown next to each team. Bar: orange = away, blue = home.
@@ -313,6 +407,15 @@ def make_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def track_record_for(today):
+    """track_record.build(today), or None (with a WARNING) if it fails: display only, never stops the build."""
+    try:
+        return track_record.build(today)
+    except Exception as err:   # noqa: BLE001
+        print(f"WARNING: track record not built ({type(err).__name__}: {err}); the site shows a note instead")
+        return None
+
+
 def injury_warnings(args, injury_report=None, injury_error=None):
     """
     (warnings by team, meta for the page). injury_report: an already fetched report (daily.py fetches it within
@@ -358,6 +461,7 @@ def main(argv=None, injury_report=None, injury_error=None):
                              react=args.react, seed=args.seed)
     # injuries come after the predictions and only add row["injuries"] (display only)
     warnings_by_team, inj_meta = injury_warnings(args, injury_report, injury_error)
+    record = track_record_for(datetime.now(EASTERN).date())
     shown = annotate_injuries(rows, warnings_by_team, inj_meta["through"])
 
     SITE_DIR.mkdir(exist_ok=True)
@@ -365,8 +469,8 @@ def main(argv=None, injury_report=None, injury_error=None):
         {"start": start.isoformat(), "end": end.isoformat(), "source": source,
          "model": Path(priors_path).name, "sigma_sim": args.sigma_sim, "sim_corr": args.sim_corr, "pace": args.pace,
          "home": args.home, "rest": args.rest, "calib": args.calib, "react": args.react,
-         "injuries": inj_meta, "games": rows}, indent=2)
-    page = render_page(rows, source, priors_path, start, end, injury_note(inj_meta))
+         "injuries": inj_meta, "track_record": record, "games": rows}, indent=2)
+    page = render_page(rows, source, priors_path, start, end, injury_note(inj_meta), render_track_record(record))
     # each file is written whole (temp file + rename), so an interrupted run never leaves half a page
     for name, text in (("predictions.json", data), ("index.html", page)):
         tmp = SITE_DIR / f"{name}.tmp"
@@ -374,10 +478,12 @@ def main(argv=None, injury_report=None, injury_error=None):
         os.replace(tmp, SITE_DIR / name)
     print(f"Wrote {len(rows)} games ({source}) to {SITE_DIR / 'index.html'}"
           + (f"; {shown} key-player injury warning(s) ({inj_meta['source']})" if inj_meta["fetched_at"] else
-             "; no injury warnings"))
+             "; no injury warnings")
+          + (f"; track record: {record['season']['games']} games this season" if record else "; no track record"))
     return {"games": len(rows), "source": source, "start": start.isoformat(), "end": end.isoformat(),
             "injury_warnings": shown if inj_meta["fetched_at"] else None, "injury_source": inj_meta["source"],
-            "injury_error": inj_meta["error"]}
+            "injury_error": inj_meta["error"],
+            "record_games": record["season"]["games"] if record else None}
 
 
 if __name__ == "__main__":
