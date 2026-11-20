@@ -61,6 +61,18 @@ Win-probability calibration (Phase 10b), "on" or "off", default "off":
             accuracy over 2,638 backtest games): its 8 factor noises are drawn independently
             while real ones partly cancel in the margin, projected margins are ~11% too small,
             and real margins are fat-tailed (see fit_calib.py).
+
+Rating reactivity (Phase 10c), "on" or "off", default "off":
+
+  react     the in-season procedure's season reset N and per-game drift M come from
+            model_params.json["react"] (code/fit_react.py, fitted on the 2024-25 live-procedure
+            backtest only) instead of the live N=20, M=30 (update.DEFAULT_N / DEFAULT_M). Why:
+            in the live procedure actual margins are ~1.11x the projected ones, growing through
+            the season (Feb-Apr ~1.25-1.4): the ratings can't keep up with in-season change
+            because the preseason prior counts as too many games (N=20) and fades too slowly (M);
+            the fit (2024-25) is N=2, M=24. Scaling the update sigma is the same as rescaling N and
+            M (exact update), so it is not a third parameter. The section also holds the calibration
+            temperature refitted for these settings (used when calib and react are both on).
 """
 import json
 import math
@@ -84,6 +96,7 @@ DEFAULT_PACE_MODE = "on"
 DEFAULT_HOME_MODE = "on"
 DEFAULT_REST_MODE = "on"
 DEFAULT_CALIB_MODE = "off"
+DEFAULT_REACT_MODE = "off"
 CALIB_CLIP = 5e-5   # P is clipped to [CALIB_CLIP, 1 - CALIB_CLIP] (half a draw of 10,000) before Phi^-1
 REST_CATEGORIES = ("b2b", "1", "2+")   # rest.CATEGORIES; "2+" is the baseline (no shift)
 # rows/columns of the factor correlation: the team's offensive line, then the opponent's
@@ -143,7 +156,7 @@ def is_on(mode: str, what: str = "switch") -> bool:
 
 
 FITTED_BY = {"factor_corr": "fit_sim.py", "points": "fit_sim.py", "pace": "fit_sim.py", "home": "fit_home.py",
-             "rest": "fit_rest.py", "calib": "fit_calib.py"}
+             "rest": "fit_rest.py", "calib": "fit_calib.py", "react": "fit_react.py"}
 
 
 def section(name: str) -> dict:
@@ -328,8 +341,14 @@ def check_temperature(a) -> float:
     return float(a)
 
 
-def calib_temperature() -> float:
-    """The fitted temperature a (model_params.json["calib"]["temperature"])."""
+def calib_temperature(react: str = DEFAULT_REACT_MODE) -> float:
+    """
+    The fitted temperature a: model_params.json["calib"]["temperature"] for the live season
+    settings (react "off"), model_params.json["react"]["calib_temperature"] for react "on" (the
+    temperature depends on how spread the projections are, so it is refitted with them).
+    """
+    if is_on(react, "react"):
+        return check_temperature(section("react").get("calib_temperature"))
     return check_temperature(section("calib").get("temperature"))
 
 
@@ -344,3 +363,23 @@ def calibrate_win_prob(p: float, mode: str = DEFAULT_CALIB_MODE, temperature=Non
     a = check_temperature(temperature) if temperature is not None else calib_temperature()
     q = min(max(float(p), CALIB_CLIP), 1 - CALIB_CLIP)
     return _NORMAL.cdf(a * _NORMAL.inv_cdf(q))
+
+
+# ---------------------------------------------------------------------------
+# Phase 10c: rating reactivity (season reset N, per-game drift M)
+# ---------------------------------------------------------------------------
+
+def check_react(values: dict) -> dict:
+    """{"n": positive int, "m": positive int}: the season reset N and per-game drift M."""
+    out = {}
+    for key in ("n", "m"):
+        v = values.get(key) if isinstance(values, dict) else None
+        if not isinstance(v, int) or isinstance(v, bool) or not 1 <= v <= 1000:
+            raise ValueError(f"react {key} must be a positive integer, got {v!r}")
+        out[key] = v
+    return out
+
+
+def react_settings() -> dict:
+    """The fitted {"n", "m"} of model_params.json["react"] (fit_react.py)."""
+    return check_react(section("react"))

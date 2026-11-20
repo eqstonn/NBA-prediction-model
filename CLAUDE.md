@@ -46,6 +46,10 @@ python code/fit_calib.py --diagnose                      # Phase 10b: where the 
 python code/fit_calib.py --overwrite                     # refit the win-probability temperature on 2024-25 -> model_params.json["calib"] (~25 s)
 python code/fit_calib.py --evaluate --old-log log_pace-home-rest.csv --new-log log_calib.csv   # test on 2025-26 + 2026-27
 python code/update.py --replay --from priors_pre_2026-27_pace-home-rest.json --out x.json --log x.csv --calib on   # = log_calib.csv
+python code/fit_react.py --diagnose                      # Phase 10c: why the ratings under-react (~7 min, writes nothing)
+python code/fit_react.py --overwrite                     # refit N, M (grid) + the react calibration temperature on 2024-25 -> model_params.json["react"] (~8 min)
+python code/fit_react.py --evaluate --old-log log_pace-home-rest.csv --new-log log_react.csv   # test on 2025-26 + 2026-27 (~40 s)
+python code/update.py --replay --react on --from priors_pre_2026-27_pace-home-rest.json --out x.json --log x.csv   # = log_react.csv
 python code/update.py --trial 5                          # DRY RUN: first 5 games of 2026-27 in memory; prints mean changes + timing, writes nothing
 python code/update.py --trial 5 --m 20                   # same with per-game drift tau = 0.1/20 (default M=30)
 python code/update.py --replay --from priors_pre_2026-27_pace-home-rest.json --out x.json --log x.csv
@@ -74,6 +78,8 @@ python code/train_calibration.py --variants live --rest off on   # the live mode
 #        default on (live since the rest switch).
 # Calibration (Phase 10b): --calib on|off (update.py, build_site.py, backtest.py, report.py; train_calibration.py
 #        --calib off on), default OFF (not live; waiting on the user's decision).
+# Reactivity (Phase 10c): --react on|off (update.py, backtest.py, report.py; build_site.py for the calib temperature),
+#        default OFF (not live). On = N, M from model_params.json["react"]; --n/--m (default 20/30) can't be combined with it.
 # --replay and dynamic_model.py never replace an existing output file unless you pass --overwrite.
 
 python -m pytest tests                                   # tests (~95 s; real PyMC fits + a fake NBA.com; never touch the real priors.json)
@@ -169,6 +175,30 @@ All code is in `code/` as flat scripts that import each other by bare module nam
 - **Tests:** 2025-26 backtest (1,322): conf − acc −4.0 → −0.2 pts, Brier 0.2145 → 0.2122 (**−0.0023 ± 0.0010, −2.2 SE**), log loss −0.0047 ± 0.0029. 2026-27 (`log_calib.csv` vs `log_pace-home-rest.csv`, 210): conf − acc −5.1 → −1.2, Brier 0.2110 → 0.2082 (**−0.0028 ± 0.0025, −1.1 SE**), log loss −0.0071 ± 0.0070. Accuracy and spread MAE identical everywhere.
 - **Training-pass check** (`train_calibration.py --variants live --calib off on`): calibration makes that setup overconfident (+3.9 pts) and worse (+0.0017 Brier, 2.2 SE). Expected: the training pass's ratings are stale and its projections too spread (slope 0.89 vs 1.11 live), so the temperature only applies to the live procedure.
 - `applied_games.json` entries record `calib` for games applied from now on (the 210 earlier ones don't have the key; `test_live.py` keeps `calib` out of `LIVE` for that reason).
+
+**Rating reactivity (Phase 10c; `--react`, default off, NOT live):**
+- **Problem:** in the live-procedure backtest actual margins are ~1.11 × projected (1.094 in 2024-25, 1.126 in 2025-26): the ratings are compressed toward average.
+- **Diagnosis** (`fit_react.py --diagnose`):
+  - **By month, the slope grows through the season:** Oct–Dec 0.94, Feb–Apr 1.33 (both seasons pooled).
+  - **The preseason priors go stale:** projected alone, never updated, their slope falls from ~0.75–0.9 in Oct/Nov to 0.1–0.7 by March. They are already below 1 in October, so they are not too shrunk; stretching them 1.2× away from the average doesn't help (Brier 0.2126 vs 0.2124).
+  - **By rating:** the miss grows by +0.11 margin points per net-rating point (2.4 SE), a uniform compression.
+  - **σ-update scale is not a separate cause:** σ × c gives exactly the same means as N × c², M × c (the exact update depends only on variance ratios; checked to 2e-16). The fitted σ is right (Phase 10b).
+  - **Cause:** N=20 makes the 3-year preseason ratings worth 20 games, and with M=30 that anchor fades too slowly, so the ratings stay tied to stale preseason means. Lowering N removes the anchor (the biggest Brier lever); lowering M only fades it.
+- **Fit:** `model_params.json["react"]`, the lowest one-step-ahead Brier on a 7×6 grid (N 1–20 × M 10–40) of full live-procedure runs of **2024-25 only**.
+  - Result: **N=2, M=24**. Brier 0.2124 → 0.2100, log loss 0.6130 → 0.6075, slope 0.965.
+  - Flat for N 2–5 and M 18–40.
+  - Refitted calibration temperature: **1.2718** (SE 0.089), used by `--calib on --react on`; 1.3612 stays for react off (`params.calib_temperature(react)`).
+- **Switch:** `--react on|off` on update.py (`--start-season`, `--update`, `--replay`, `--trial`), backtest.py and report.py.
+  - With react on, N and M come from the section and `--n` / `--m` are refused (`update.season_settings`). `--n`/`--m` now default to None and resolve to 20 / 30.
+  - `build_site.py --react` only picks the calibration temperature.
+  - `applied_games.json` entries record `react` from now on.
+  - Unlike calib it changes the priors: `priors_2026-27_react.json` / `log_react.csv` = `--replay --react on` from `priors_pre_2026-27_pace-home-rest.json`.
+- **Tests:**
+  - **2025-26 backtest (1,322):** Brier 0.2145 → 0.2092 (**−0.0054 ± 0.0013, −4.2 SE**), log loss −4.3 SE, winners 66.2% → 67.1%, spread MAE 11.67 → 11.54, slope 1.126 → 0.991. Calibrated on both: −0.0049 (−3.1 SE).
+  - **2026-27 (210):** Brier 0.2110 → 0.2115 (**+0.0005 ± 0.0059, +0.1 SE**), log loss +0.3 SE, winners 67.6% → 70.0%, spread MAE 11.96 → 12.23, slope 1.067 → 0.748. Calibrated on both: +0.0026 (+0.4 SE).
+  - In the backtests the gain is largest in each season's first 210 games (−0.0077, −0.0155), so 2026-27 is inconclusive, not a contradiction.
+  - Not recommended live yet under the rule "better Brier on both test sets"; re-check as 2026-27 grows (replay 2 s, `--evaluate` ~40 s).
+- **Making it live** would need: `DEFAULT_REACT_MODE = "on"`, `priors.json` ← `priors_2026-27_react.json` (the ratings differ), `react: "on"` for the recorded games, the CLAUDE.md live text and the report regenerated.
 
 **Accuracy report (Phase 10):** `report.py` reads only (training CSV, Kaggle betting CSV, the prediction logs, `data/lines_2026-27.csv`) and writes only `reports/accuracy_report.md` + `reports/calibration.png` (matplotlib, Agg backend).
 - **Predictors:** the live model; Vegas = Φ(−spread_home / SD) with SD = RMS(margin + spread) over the 3,956 training games (**13.83**, mean residual −0.09); Vegas moneyline (no vig) only where `lines.py` saved one (none in training: the Kaggle moneylines stop in 2022-23); always home (P = training home win rate 0.549); better record so far in the season (earlier days only, P = 0.649, ties → home).

@@ -1,6 +1,6 @@
 # Accuracy report: the live model vs Vegas and simple baselines
 
-Generated 2026-11-19 by `python code/report.py`. Live model as in `params.py`: exact engine, fitted σ in the update and the simulation, team paces, home-court boost, rest (back-to-backs), 10,000-draw simulation; win-probability calibration (Phase 10b) **off**.
+Generated 2026-11-19 by `python code/report.py`. Live model as in `params.py`: exact engine, fitted σ in the update and the simulation, team paces, home-court boost, rest (back-to-backs), 10,000-draw simulation; win-probability calibration (Phase 10b) **off**, rating reactivity (Phase 10c) **off**.
 
 ## Summary
 

@@ -263,7 +263,8 @@ def join_lines(model_rows: list, by_id: dict, line_by_id: dict) -> list:
     return out
 
 
-def training_sample(training_csv, betting_csv, calib: str = params.DEFAULT_CALIB_MODE) -> dict:
+def training_sample(training_csv, betting_csv, calib: str = params.DEFAULT_CALIB_MODE,
+                    react: str = params.DEFAULT_REACT_MODE) -> dict:
     """
     The training seasons: both backtests' predictions (main: the live procedure, backtest.py; secondary:
     the training pass, train_calibration.run_pass) joined to the Kaggle lines, plus baselines and the Vegas SD.
@@ -283,7 +284,7 @@ def training_sample(training_csv, betting_csv, calib: str = params.DEFAULT_CALIB
     baselines = fit_baselines(games)
     records = records_before(games)
 
-    live = backtest.run_backtest(training_csv, data=data, calib=calib)
+    live = backtest.run_backtest(training_csv, data=data, calib=calib, react=react)
     records_out = train_calibration.run_pass(data, params.DEFAULT_HOME_MODE, [LIVE_VARIANT], params.DEFAULT_REST_MODE,
                                              with_ids=True, calib=calib)[LIVE_VARIANT]
     pass_rows = [{"game_id": gid, "home_won": margin > 0, "margin": margin, "total": total, "p_model": p,
@@ -649,7 +650,8 @@ def write_report(train: dict, season: dict, out_path: Path, betting_csv: Path, l
     L.append(f"Generated {date.today().isoformat()} by `python code/report.py`. Live model as in `params.py`: "
              f"exact engine, fitted σ in the update and the simulation, team paces, home-court boost, rest "
              f"(back-to-backs), 10,000-draw simulation; win-probability calibration (Phase 10b) "
-             f"**{train.get('calib', params.DEFAULT_CALIB_MODE)}**.\n")
+             f"**{train.get('calib', params.DEFAULT_CALIB_MODE)}**, rating reactivity (Phase 10c) "
+             f"**{train.get('react', params.DEFAULT_REACT_MODE)}**.\n")
     L.append("## Summary\n")
     pb = t["paired"]["Model"]
     L.append(f"- **Training seasons, live-procedure backtest (2024-25, 2025-26; {t['n']:,} games):** model "
@@ -790,9 +792,10 @@ def write_report(train: dict, season: dict, out_path: Path, betting_csv: Path, l
     out_path.write_text("\n".join(L) + "\n", encoding="utf-8")
 
 
-def build(training_csv, betting_csv, log_paths, lines_path, out_path, calib: str = params.DEFAULT_CALIB_MODE) -> dict:
-    train = training_sample(training_csv, betting_csv, calib)
-    train["calib"] = calib
+def build(training_csv, betting_csv, log_paths, lines_path, out_path, calib: str = params.DEFAULT_CALIB_MODE,
+          react: str = params.DEFAULT_REACT_MODE) -> dict:
+    train = training_sample(training_csv, betting_csv, calib, react)
+    train["calib"], train["react"] = calib, react
     sd = train["sd"]["sd"]
     train["result"] = score_games(train["rows"], sd, train["baselines"], train["records"], with_vegas=True)
     train["pass_result"] = score_games(train["pass_rows"], sd, train["baselines"], train["records"], with_vegas=True)
@@ -823,6 +826,10 @@ def main(argv=None):
     parser.add_argument("--calib", choices=params.SWITCH_MODES, default=params.DEFAULT_CALIB_MODE,
                         help="win-probability calibration in the backtests (Phase 10b); with on, pass --log with "
                              f"logs made with --calib on (e.g. log_calib.csv); default {params.DEFAULT_CALIB_MODE}")
+    parser.add_argument("--react", choices=params.SWITCH_MODES, default=params.DEFAULT_REACT_MODE,
+                        help="N and M of the live-procedure backtest from model_params.json (Phase 10c); with on, "
+                             "pass --log with logs made with --react on (e.g. log_react.csv); default "
+                             f"{params.DEFAULT_REACT_MODE}")
     args = parser.parse_args(argv)
     if not Path(args.betting_csv).exists():
         parser.error(f"{args.betting_csv} not found; see code/historical_lines.py for the download")
@@ -831,7 +838,11 @@ def main(argv=None):
     if args.calib != params.DEFAULT_CALIB_MODE and args.log == [str(p) for p in LIVE_LOGS]:
         parser.error(f"--calib {args.calib} needs --log with logs made with that setting (the default logs are "
                      f"the live model's, calib {params.DEFAULT_CALIB_MODE})")
-    result = build(args.training_csv, args.betting_csv, args.log, args.lines, args.out, calib=args.calib)
+    if args.react != params.DEFAULT_REACT_MODE and args.log == [str(p) for p in LIVE_LOGS]:
+        parser.error(f"--react {args.react} needs --log with logs made with that setting (the default logs are "
+                     f"the live model's, react {params.DEFAULT_REACT_MODE})")
+    result = build(args.training_csv, args.betting_csv, args.log, args.lines, args.out, calib=args.calib,
+                   react=args.react)
     t, s = result["train"]["result"], result["season"]
     print(f"Training: {t['n']} games; 2026-27: {s['all']['n']} logged, {s['vegas']['n']} with closing lines.")
     print(f"Wrote {args.out} and {Path(args.out).parent / CHART_NAME}")

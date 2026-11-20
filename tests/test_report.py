@@ -294,7 +294,7 @@ def test_build_writes_the_report_and_chart(tmp_path, season_files, monkeypatch):
              "sd": report.fit_spread_sd([r["margin"] for r in rows], [r["spread_home"] for r in rows]),
              "baselines": report.fit_baselines(games), "records": report.records_before(games),
              "match": {"matched": 400, "games": 400, "rate": 1.0}, "first": "2023-10-24", "last": "2026-06-13"}
-    monkeypatch.setattr(report, "training_sample", lambda training_csv, betting_csv, calib="off": train)
+    monkeypatch.setattr(report, "training_sample", lambda training_csv, betting_csv, calib="off", react="off": train)
     betting = tmp_path / "betting.csv"
     betting.write_text("season,date\n", encoding="utf-8")
     logs, lines_csv = season_files
@@ -344,6 +344,15 @@ def test_cli_refuses_calib_with_the_live_logs(tmp_path):
     betting.write_text("x\n", encoding="utf-8")
     with pytest.raises(SystemExit):
         report.main(["--betting-csv", str(betting), "--calib", "on", "--out", str(tmp_path / "r.md")])
+
+
+def test_cli_refuses_react_with_the_live_logs(tmp_path, capsys):
+    """--react on with the default (live N, M) logs would mix two models in one report."""
+    betting = tmp_path / "b.csv"
+    betting.write_text("x\n", encoding="utf-8")
+    with pytest.raises(SystemExit):
+        report.main(["--betting-csv", str(betting), "--react", "on", "--out", str(tmp_path / "r.md")])
+    assert "--react on needs --log" in capsys.readouterr().err
 
 
 def test_cli_checks_its_inputs(tmp_path):

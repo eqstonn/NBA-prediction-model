@@ -28,7 +28,7 @@ def predict_game(home_id: str, away_id: str, model: dict, seed=None, sigma=None,
                  sim_corr: str = params.DEFAULT_SIM_CORR_MODE, pace: str = params.DEFAULT_PACE_MODE,
                  home: str = params.DEFAULT_HOME_MODE, neutral: bool = False,
                  rest: str = params.DEFAULT_REST_MODE, rest_home=None, rest_away=None,
-                 calib: str = params.DEFAULT_CALIB_MODE):
+                 calib: str = params.DEFAULT_CALIB_MODE, calib_temperature=None):
     """
     Returns:
         {"home_win_pct": float, "away_win_pct": float,
@@ -39,12 +39,14 @@ def predict_game(home_id: str, away_id: str, model: dict, seed=None, sigma=None,
     home on; see simulation.py). pace on needs team paces in `model`. neutral=True:
     a neutral-site game, no home boost. rest="on" (the default): rest_home / rest_away are
     the teams' rest ("b2b", "1", "2+"; rest.py). calib="on": calibrated win % (Phase 10b,
-    params.calibrate_win_prob; default "off"); the scores are the same either way.
+    params.calibrate_win_prob; default "off"); the scores are the same either way. calib_temperature:
+    default the live settings' (params.calib_temperature(react) picks the one for react on/off).
     """
     if home_id not in model or away_id not in model:
         return None
     r = simulate_factors(home_id, away_id, model, seed=seed, sigma=sigma, sim_corr=sim_corr, pace=pace,
-                         home=home, neutral=neutral, rest=rest, rest_a=rest_home, rest_b=rest_away, calib=calib)
+                         home=home, neutral=neutral, rest=rest, rest_a=rest_home, rest_b=rest_away, calib=calib,
+                         calib_temperature=calib_temperature)
     return {
         "home_win_pct": float(r["team_a_win_pct"]),
         "away_win_pct": float(r["team_b_win_pct"]),

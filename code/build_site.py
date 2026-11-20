@@ -33,13 +33,17 @@ EASTERN = ZoneInfo("America/New_York")
 def build_predictions(games, model, sim_sigma=None, sim_corr: str = params.DEFAULT_SIM_CORR_MODE,
                       pace: str = params.DEFAULT_PACE_MODE, home: str = params.DEFAULT_HOME_MODE,
                       rest: str = params.DEFAULT_REST_MODE, rest_lookup=None,
-                      calib: str = params.DEFAULT_CALIB_MODE):
+                      calib: str = params.DEFAULT_CALIB_MODE, react: str = params.DEFAULT_REACT_MODE):
     """
     sim_sigma: {factor: game noise} for the simulation; None = params.sim_sigma() (fitted by default).
     sim_corr / pace / home / rest / calib: "on" or "off" (defaults in params.py, see simulation.py); a game
     with "neutral": True gets no home boost. rest="on" needs rest_lookup(team_id, date) -> rest
     info (rest.rest_lookup of the season's NBA.com schedule); each row then carries "rest".
+    react: which calibration temperature calib "on" uses (Phase 10c: the one refitted for --react on);
+    the ratings themselves are whatever `model` is.
     """
+    temperature = params.calib_temperature(react) if params.is_on(calib, "calib") else None
+    params.is_on(react, "react")
     with_rest = params.is_on(rest, "rest")
     if with_rest and rest_lookup is None:
         raise ValueError("rest is on but there is no rest_lookup (the season's schedule)")
@@ -48,7 +52,7 @@ def build_predictions(games, model, sim_sigma=None, sim_corr: str = params.DEFAU
         days = {side: rest_lookup(g[side]["id"], g["date"])["rest"] for side in ("home", "away")} if with_rest else {}
         pred = predict_game(g["home"]["id"], g["away"]["id"], model, sigma=sim_sigma, sim_corr=sim_corr, pace=pace,
                             home=home, neutral=g.get("neutral", False), rest=rest, rest_home=days.get("home"),
-                            rest_away=days.get("away"), calib=calib)
+                            rest_away=days.get("away"), calib=calib, calib_temperature=temperature)
         row = dict(g, prediction=pred)
         if with_rest:
             row["rest"] = days
@@ -213,6 +217,9 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--calib", choices=params.SWITCH_MODES, default=params.DEFAULT_CALIB_MODE,
                         help="calibrate the win %% with the fitted temperature (Phase 10b; scores unchanged; "
                              f"default {params.DEFAULT_CALIB_MODE})")
+    parser.add_argument("--react", choices=params.SWITCH_MODES, default=params.DEFAULT_REACT_MODE,
+                        help="the priors come from the --react on season procedure (Phase 10c); only picks the "
+                             f"calibration temperature for --calib on (default {params.DEFAULT_REACT_MODE})")
     return parser
 
 
@@ -226,13 +233,15 @@ def main(argv=None):
     games, source = fetch_games(start, args.days)
     lookup = rest_days.rest_lookup(boxscores.get_schedule(boxscores.SEASON)) if args.rest == "on" else None
     rows = build_predictions(games, model, sim_sigma=params.sim_sigma(args.sigma_sim), sim_corr=args.sim_corr,
-                             pace=args.pace, home=args.home, rest=args.rest, rest_lookup=lookup, calib=args.calib)
+                             pace=args.pace, home=args.home, rest=args.rest, rest_lookup=lookup, calib=args.calib,
+                             react=args.react)
 
     SITE_DIR.mkdir(exist_ok=True)
     (SITE_DIR / "predictions.json").write_text(json.dumps(
         {"start": start.isoformat(), "end": end.isoformat(), "source": source,
          "model": Path(priors_path).name, "sigma_sim": args.sigma_sim, "sim_corr": args.sim_corr, "pace": args.pace,
-         "home": args.home, "rest": args.rest, "calib": args.calib, "games": rows}, indent=2), encoding="utf-8")
+         "home": args.home, "rest": args.rest, "calib": args.calib, "react": args.react,
+         "games": rows}, indent=2), encoding="utf-8")
     (SITE_DIR / "index.html").write_text(render_page(rows, source, priors_path, start, end), encoding="utf-8")
     print(f"Wrote {len(rows)} games ({source}) to {SITE_DIR / 'index.html'}")
 

@@ -94,6 +94,13 @@ Phi(a * Phi^-1(P)) of the simulated P, a = model_params.json["calib"]["temperatu
 It only changes the win %, never the pick or the scores, and never the update, so a replay with
 --calib on ends in the same priors. applied_games.json records "calib" for games applied from now on.
 
+Rating reactivity (Phase 10c, --react on|off, default off): the season reset N and the drift M
+come from model_params.json["react"] (fit_react.py) instead of N=20, M=30, so the ratings follow
+in-season change faster. Unlike --calib it changes the update, so its priors differ from the live
+ones (a replay: priors_2026-27_react.json / log_react.csv). --n / --m can't be combined with it.
+With --calib on as well, the win % uses the temperature refitted for these settings. applied_games.json
+records "react" for games applied from now on.
+
 Betting lines (Phase 10a, --lines on|off, default on; not part of the model): --update also saves
 one snapshot of every upcoming game's Vegas lines from The Odds API into data/lines_2026-27.csv
 (lines.py: ONE API request per run, appended, never overwritten). Without ODDS_API_KEY, or if the
@@ -139,6 +146,28 @@ STD_SCALE = 0.1
 DEFAULT_N = 20
 DEFAULT_M = 30
 SEASON_GAMES = 1230  # 30 teams x 82 games / 2
+
+
+def season_settings(react: str = params.DEFAULT_REACT_MODE, n=None, m=None) -> tuple:
+    """
+    (N, M) of the in-season procedure: react "off" = n / m as given, else DEFAULT_N / DEFAULT_M (20, 30);
+    react "on" = model_params.json["react"] (params.react_settings). With react on, n / m must be None:
+    the switch sets them (ValueError otherwise).
+    """
+    if params.is_on(react, "react"):
+        if n is not None or m is not None:
+            raise ValueError("--react on sets N and M (model_params.json[\"react\"]); don't pass --n / --m with it")
+        s = params.react_settings()
+        return s["n"], s["m"]
+    return (DEFAULT_N if n is None else n), (DEFAULT_M if m is None else m)
+
+
+def calib_temperature(calib: str, react: str):
+    """The calibration temperature for these settings: None when calib is off (validates both switches)."""
+    with_react = params.is_on(react, "react")
+    if not params.is_on(calib, "calib"):
+        return None
+    return params.calib_temperature("on" if with_react else "off")
 
 
 def season_std(n: int) -> float:
@@ -203,12 +232,15 @@ def require_pace(priors: dict, what: str) -> None:
                          f"{'...' if len(missing) > 5 else ''}; train priors with dynamic_model.py --pace on")
 
 
-def start_season(n: int = DEFAULT_N, from_path=None, pace: str = params.DEFAULT_PACE_MODE) -> dict:
+def start_season(n=None, from_path=None, pace: str = params.DEFAULT_PACE_MODE,
+                 react: str = params.DEFAULT_REACT_MODE) -> dict:
     """
     Rebuild priors.json from the preseason priors (default START_PRIORS_PATH, the live
     model's) and clear applied_games.json. pace="on" (the default) refuses a source without
-    team paces, since --update with --pace on couldn't use the result.
+    team paces, since --update with --pace on couldn't use the result. n: default
+    DEFAULT_N, or model_params.json["react"]["n"] with react="on" (season_settings).
     """
+    n, _ = season_settings(react, n=n)
     from_path = Path(from_path or START_PRIORS_PATH)
     source = load_json(from_path)
     if params.is_on(pace, "pace"):
@@ -302,7 +334,7 @@ def record_game(priors: dict, applied: dict, game: dict, engine: str = DEFAULT_E
                 sigma_sim: str = params.DEFAULT_SIM_SIGMA_MODE,
                 sim_corr: str = params.DEFAULT_SIM_CORR_MODE, pace: str = params.DEFAULT_PACE_MODE,
                 home_mode: str = params.DEFAULT_HOME_MODE, rest_mode: str = params.DEFAULT_REST_MODE,
-                calib: str = params.DEFAULT_CALIB_MODE) -> None:
+                calib: str = params.DEFAULT_CALIB_MODE, react: str = params.DEFAULT_REACT_MODE) -> None:
     """Save priors.json and record the game in applied_games.json, crash-safely (see module docstring)."""
     home, away = game["home"], game["away"]
     entry = {"date": game["date"],
@@ -318,6 +350,7 @@ def record_game(priors: dict, applied: dict, game: dict, engine: str = DEFAULT_E
              "home": home_mode,
              "rest": rest_mode,
              "calib": calib,
+             "react": react,
              "pending": priors_fingerprint(priors)}
     applied[game["game_id"]] = entry
     write_json(APPLIED_GAMES_PATH, applied)   # 1. pending, with the fingerprint of the new priors
@@ -333,12 +366,17 @@ def fit_seed(game_id: str) -> int:
 
 def log_prediction(priors: dict, game: dict, log_path, sigma=None, sim_corr: str = params.DEFAULT_SIM_CORR_MODE,
                    pace: str = params.DEFAULT_PACE_MODE, home: str = params.DEFAULT_HOME_MODE,
-                   rest: str = params.DEFAULT_REST_MODE, calib: str = params.DEFAULT_CALIB_MODE) -> None:
-    """Predict `game` from `priors` (fixed simulation seed) and append it to the log unless it's already there."""
+                   rest: str = params.DEFAULT_REST_MODE, calib: str = params.DEFAULT_CALIB_MODE,
+                   react: str = params.DEFAULT_REACT_MODE) -> None:
+    """
+    Predict `game` from `priors` (fixed simulation seed) and append it to the log unless it's already there.
+    react: only picks the calibration temperature (with calib on); the priors already are what they are.
+    """
     days = game.get("rest", {})
     prediction = predict_game(game["home"]["id"], game["away"]["id"], priors, seed=predlog.PREDICT_SEED, sigma=sigma,
                               sim_corr=sim_corr, pace=pace, home=home, neutral=game.get("neutral", False),
-                              rest=rest, rest_home=days.get("home"), rest_away=days.get("away"), calib=calib)
+                              rest=rest, rest_home=days.get("home"), rest_away=days.get("away"), calib=calib,
+                              calib_temperature=calib_temperature(calib, react))
     if prediction is None:
         raise KeyError(f"game {game['game_id']}: a team is missing from the priors")
     predlog.append_rows(log_path, [predlog.make_row(game, prediction)])
@@ -376,12 +414,13 @@ def print_log_metrics(log_path) -> dict:
     return m
 
 
-def run_update(through=None, limit=None, m: int = DEFAULT_M, log_path=None, engine: str = DEFAULT_ENGINE,
+def run_update(through=None, limit=None, m=None, log_path=None, engine: str = DEFAULT_ENGINE,
                sigma_update: str = params.DEFAULT_UPDATE_SIGMA_MODE,
                sigma_sim: str = params.DEFAULT_SIM_SIGMA_MODE,
                sim_corr: str = params.DEFAULT_SIM_CORR_MODE, pace: str = params.DEFAULT_PACE_MODE,
                home: str = params.DEFAULT_HOME_MODE, rest: str = params.DEFAULT_REST_MODE,
-               lines: str = betting_lines.DEFAULT_LINES_MODE, calib: str = params.DEFAULT_CALIB_MODE) -> dict:
+               lines: str = betting_lines.DEFAULT_LINES_MODE, calib: str = params.DEFAULT_CALIB_MODE,
+               react: str = params.DEFAULT_REACT_MODE) -> dict:
     """
     Apply every finished, not-yet-applied game (oldest first) to priors.json; saves after
     each game. Each game is first predicted from the current priors and logged to
@@ -391,12 +430,14 @@ def run_update(through=None, limit=None, m: int = DEFAULT_M, log_path=None, engi
     home="on" adds the home boost except at neutral sites (flag from NBA.com's schedule).
     rest="on" adds the rest effect (both teams' rest from NBA.com's schedule, rest.py).
     lines="on" also saves a snapshot of upcoming games' betting lines (save_lines; never fails the run).
+    m: default DEFAULT_M, or model_params.json["react"]["m"] with react="on" (season_settings).
     Returns {"applied": [ids], "skipped": [(id, reason)], "already": count, "remaining": count,
              "disagreements": [game log vs schedule warnings], "metrics": {...} of the whole log,
              "lines": lines.fetch_lines' result, or None when not saved}.
     """
     params.is_on(lines, "lines")                  # validates the setting before any work
-    params.calibrate_win_prob(0.6, calib)         # validates the setting (and the temperature) before any work
+    _, m = season_settings(react, m=m)            # validates the setting (and the react section) before any work
+    calib_temperature(calib, react)               # validates the setting (and the temperature) before any work
     log_path = Path(log_path or LOG_PATH)
     update_sigma, sim_sigma = params.update_sigma(sigma_update), params.sim_sigma(sigma_sim)
     params.sim_corr(sim_corr)                     # validates the setting (and the matrix) before any work
@@ -421,7 +462,7 @@ def run_update(through=None, limit=None, m: int = DEFAULT_M, log_path=None, engi
           f"{already} already applied, {len(todo)} to go"
           + (f" (stopping after {limit})" if limit is not None and limit < len(todo) else "")
           + f". M={m}, tau={season_tau(m):.5f}, engine={engine}, sigma update={sigma_update} sim={sigma_sim}, "
-            f"sim_corr={sim_corr}, pace={pace}, home={home}, rest={rest}, calib={calib}\n")
+            f"sim_corr={sim_corr}, pace={pace}, home={home}, rest={rest}, calib={calib}, react={react}\n")
     # betting lines for upcoming games (the schedule was just refreshed above, for the matching)
     lines_result = save_lines(lines)
 
@@ -453,10 +494,11 @@ def run_update(through=None, limit=None, m: int = DEFAULT_M, log_path=None, engi
             game = add_rest(game, rest_table)
         # before applying: the prediction uses pre-game priors
         log_prediction(priors, game, log_path, sim_sigma, sim_corr=sim_corr, pace=pace, home=home, rest=rest,
-                       calib=calib)
+                       calib=calib, react=react)
         new_priors = apply_game(copy.deepcopy(priors), game, m, random_seed=fit_seed(game["game_id"]), engine=engine,
                                 sigma=update_sigma, pace=pace, home=home, rest=rest)
-        record_game(new_priors, applied, game, engine, sigma_update, sigma_sim, sim_corr, pace, home, rest, calib)
+        record_game(new_priors, applied, game, engine, sigma_update, sigma_sim, sim_corr, pace, home, rest, calib,
+                    react)
         priors = new_priors
         done.append(game["game_id"])
         print(f"  [{len(done):>4}] {label}  {time.perf_counter() - t:.1f} s")
@@ -487,11 +529,12 @@ def _replay_game(game_id: str, entry: dict, factors: dict) -> dict:
             "winner": home["id"] if home_pts > away_pts else away["id"]}
 
 
-def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M, engine: str = DEFAULT_ENGINE,
+def replay(from_path, out_path, log_path, n=None, m=None, engine: str = DEFAULT_ENGINE,
            sigma_update: str = params.DEFAULT_UPDATE_SIGMA_MODE, sigma_sim: str = params.DEFAULT_SIM_SIGMA_MODE,
            overwrite: bool = False, sim_corr: str = params.DEFAULT_SIM_CORR_MODE,
            pace: str = params.DEFAULT_PACE_MODE, home: str = params.DEFAULT_HOME_MODE,
-           rest: str = params.DEFAULT_REST_MODE, calib: str = params.DEFAULT_CALIB_MODE) -> dict:
+           rest: str = params.DEFAULT_REST_MODE, calib: str = params.DEFAULT_CALIB_MODE,
+           react: str = params.DEFAULT_REACT_MODE) -> dict:
     """
     Season reset from `from_path` (std 0.1/sqrt(n)), then every game in applied_games.json,
     oldest first (date, gameId), each predicted + logged before it is applied. Writes ONLY
@@ -502,7 +545,9 @@ def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M
     home="on" takes each game's neutral-site flag from the cached NBA.com schedule
     (stats/schedules/, downloaded if missing); home="off" never reads it. rest="on" takes
     both teams' rest from the same cached schedule (rest.py).
+    n / m: default DEFAULT_N / DEFAULT_M, or model_params.json["react"] with react="on" (season_settings).
     """
+    n, m = season_settings(react, n, m)
     from_path, out_path, log_path = Path(from_path), Path(out_path), Path(log_path)
     protected = {p.resolve(): p.name for p in (PRIORS_PATH, APPLIED_GAMES_PATH, FROZEN_PRIORS_PATH, LOG_PATH,
                                                params.PARAMS_PATH, from_path)}
@@ -517,7 +562,7 @@ def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M
     params.sim_corr(sim_corr)                     # validates the setting (and the matrix) before any work
     params.home_offsets(home)                     # validates the setting (and the boost) before any work
     params.rest_offsets(rest, "2+", "2+")         # validates the setting (and the effects) before any work
-    params.calibrate_win_prob(0.6, calib)         # validates the setting (and the temperature) before any work
+    calib_temperature(calib, react)               # validates the setting (and the temperature) before any work
     with_pace, with_home = params.is_on(pace, "pace"), params.is_on(home, "home")
     with_rest = params.is_on(rest, "rest")
     start_priors = load_json(from_path)
@@ -538,7 +583,7 @@ def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M
     print(f"Replaying {len(order)} games from {applied[order[0]]['date']} to {applied[order[-1]]['date']}, "
           f"oldest first, from {from_path.name} (N={n}, M={m}, engine={engine}, "
           f"sigma update={sigma_update} sim={sigma_sim}, sim_corr={sim_corr}, pace={pace}, home={home}, "
-          f"rest={rest}, calib={calib}) "
+          f"rest={rest}, calib={calib}, react={react}) "
           f"-> {out_path.name}, {log_path.name}"
           + (f"; neutral sites: {', '.join(g for g in order if neutral[g]) or 'none'}" if with_home else "")
           + (f"; {sum(any(i['rest'] == 'b2b' for i in rest_table[g].values()) for g in order)} games with a team "
@@ -561,7 +606,7 @@ def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M
             game = add_rest(game, rest_table)
         t = time.perf_counter()
         log_prediction(priors, game, log_path, sim_sigma, sim_corr=sim_corr, pace=pace, home=home, rest=rest,
-                       calib=calib)
+                       calib=calib, react=react)
         apply_game(priors, game, m, random_seed=fit_seed(game_id), engine=engine, sigma=update_sigma, pace=pace,
                    home=home, rest=rest)
         print(f"  [{i:>4}/{len(order)}] {game['date']}  {applied[game_id]['matchup']}  ({game_id})  "
@@ -572,16 +617,19 @@ def replay(from_path, out_path, log_path, n: int = DEFAULT_N, m: int = DEFAULT_M
     return {"games": order, "metrics": print_log_metrics(log_path)}
 
 
-def trial(n: int = 5, m: int = DEFAULT_M, engine: str = DEFAULT_ENGINE,
+def trial(n: int = 5, m=None, engine: str = DEFAULT_ENGINE,
           sigma_update: str = params.DEFAULT_UPDATE_SIGMA_MODE, pace: str = params.DEFAULT_PACE_MODE,
-          home: str = params.DEFAULT_HOME_MODE, rest: str = params.DEFAULT_REST_MODE) -> None:
+          home: str = params.DEFAULT_HOME_MODE, rest: str = params.DEFAULT_REST_MODE,
+          react: str = params.DEFAULT_REACT_MODE) -> None:
     """
     Dry run: apply the season's first n games to an in-memory copy of priors.json. Never
     writes the priors (box scores and schedules are cached as usual). pace="on" also gets
     each game's possessions (a game without them is left out); home="on" takes the
-    neutral-site flags from NBA.com's schedule.
+    neutral-site flags from NBA.com's schedule. m: default DEFAULT_M, or the react one (season_settings).
     """
     from boxscores import SEASON, fetch_games
+
+    _, m = season_settings(react, m=m)
 
     params.home_offsets(home)                     # validates the setting (and the boost) before any work
     with_pace, with_home = params.is_on(pace, "pace"), params.is_on(home, "home")
@@ -650,9 +698,9 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--start-season", action="store_true",
                         help=f"reset priors.json from --from (default {START_PRIORS_PATH.name}) and clear "
                              f"{APPLIED_GAMES_PATH.name}")
-    parser.add_argument("--n", type=int, default=DEFAULT_N,
+    parser.add_argument("--n", type=int, default=None,
                         help="games of evidence the preseason prior is worth; std = 0.1/sqrt(N) "
-                             f"(default {DEFAULT_N})")
+                             f"(default {DEFAULT_N}; --react on sets it)")
     parser.add_argument("--update", action="store_true",
                         help="apply every finished, not-yet-applied game to priors.json (saved after each game)")
     parser.add_argument("--through", metavar="YYYY-MM-DD",
@@ -662,8 +710,9 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--trial", type=int, metavar="GAMES",
                         help="dry run: apply the season's first GAMES games in memory, print the "
                              "changes and timing, write nothing")
-    parser.add_argument("--m", type=int, default=DEFAULT_M,
-                        help=f"per-game drift tau = 0.1/M added before each fit (default {DEFAULT_M})")
+    parser.add_argument("--m", type=int, default=None,
+                        help=f"per-game drift tau = 0.1/M added before each fit (default {DEFAULT_M}; "
+                             "--react on sets it)")
     parser.add_argument("--engine", choices=ENGINES, default=DEFAULT_ENGINE,
                         help=f"how each game's update is computed: exact (closed form) or pymc (MCMC); "
                              f"default {DEFAULT_ENGINE}")
@@ -689,6 +738,10 @@ def make_parser() -> argparse.ArgumentParser:
     parser.add_argument("--calib", choices=params.SWITCH_MODES, default=params.DEFAULT_CALIB_MODE,
                         help="calibrate the logged win %% with the fitted temperature (Phase 10b, "
                              f"model_params.json[\"calib\"]); scores unchanged; default {params.DEFAULT_CALIB_MODE}")
+    parser.add_argument("--react", choices=params.SWITCH_MODES, default=params.DEFAULT_REACT_MODE,
+                        help="season reset N and drift M from model_params.json[\"react\"] (Phase 10c: ratings "
+                             "that follow in-season change faster) instead of N=20, M=30; not with --n / --m; "
+                             f"default {params.DEFAULT_REACT_MODE}")
     parser.add_argument("--lines", choices=params.SWITCH_MODES, default=None,
                         help="with --update: also save a snapshot of upcoming games' betting lines from The Odds "
                              f"API (key from {betting_lines.KEY_ENV}; one request; skipped with a warning without "
@@ -711,10 +764,14 @@ def main(argv=None):
     parser = make_parser()
     args = parser.parse_args(argv)
 
-    if args.n <= 0:
+    if args.n is not None and args.n <= 0:
         parser.error("--n must be a positive integer")
-    if args.m <= 0:
+    if args.m is not None and args.m <= 0:
         parser.error("--m must be a positive integer")
+    try:
+        n, _ = season_settings(args.react, args.n, args.m)   # validates; each command resolves N and M the same way
+    except (ValueError, KeyError) as err:
+        parser.error(str(err.args[0]))
     if args.trial is not None and args.trial <= 0:
         parser.error("--trial must be a positive integer")
     if args.limit is not None and args.limit <= 0:
@@ -749,7 +806,8 @@ def main(argv=None):
         try:
             replay(args.from_path, args.out, args.log, n=args.n, m=args.m, engine=args.engine,
                    sigma_update=args.sigma_update, sigma_sim=args.sigma_sim, overwrite=args.overwrite,
-                   sim_corr=args.sim_corr, pace=args.pace, home=args.home, rest=args.rest, calib=args.calib)
+                   sim_corr=args.sim_corr, pace=args.pace, home=args.home, rest=args.rest, calib=args.calib,
+                   react=args.react)
         except ValueError as err:
             parser.error(str(err))
         return
@@ -757,10 +815,10 @@ def main(argv=None):
     if args.start_season:
         source = Path(args.from_path or START_PRIORS_PATH)
         try:
-            start_season(args.n, source, pace=args.pace)
+            start_season(args.n, source, pace=args.pace, react=args.react)
         except ValueError as err:
             parser.error(str(err))
-        print(f"Reset {len(NBA_TEAMS)} NBA teams to std = {season_std(args.n):.5f} (N={args.n}) "
+        print(f"Reset {len(NBA_TEAMS)} NBA teams to std = {season_std(n):.5f} (N={n}, react={args.react}) "
               f"from {source.name} -> {PRIORS_PATH.name}; cleared {APPLIED_GAMES_PATH.name}")
     if args.update:
         if args.pace == "on":
@@ -770,10 +828,10 @@ def main(argv=None):
                 parser.error(str(err))
         run_update(through=args.through, limit=args.limit, m=args.m, log_path=args.log, engine=args.engine,
                    sigma_update=args.sigma_update, sigma_sim=args.sigma_sim, sim_corr=args.sim_corr, pace=args.pace,
-                   home=args.home, rest=args.rest, lines=args.lines, calib=args.calib)
+                   home=args.home, rest=args.rest, lines=args.lines, calib=args.calib, react=args.react)
     if args.trial is not None:
         trial(args.trial, args.m, engine=args.engine, sigma_update=args.sigma_update, pace=args.pace,
-              home=args.home, rest=args.rest)
+              home=args.home, rest=args.rest, react=args.react)
 
 
 if __name__ == "__main__":

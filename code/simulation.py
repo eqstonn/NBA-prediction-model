@@ -121,7 +121,7 @@ def simulate_factors(team_a, team_b, data: dict, seed=None, sigma=None,
                      sim_corr: str = params.DEFAULT_SIM_CORR_MODE, pace: str = params.DEFAULT_PACE_MODE,
                      home: str = params.DEFAULT_HOME_MODE, neutral: bool = False,
                      rest: str = params.DEFAULT_REST_MODE, rest_a=None, rest_b=None,
-                     calib: str = params.DEFAULT_CALIB_MODE, pace_sigma=None):
+                     calib: str = params.DEFAULT_CALIB_MODE, pace_sigma=None, calib_temperature=None):
     """
     Simulate team_a vs team_b from the curves in `data` (priors). seed=None: fresh randomness
     (website); an int: reproducible (prediction log). sigma: {factor: game noise}, default
@@ -130,6 +130,8 @@ def simulate_factors(team_a, team_b, data: dict, seed=None, sigma=None,
     shifts and team_b's line the "defense" shifts (params.home_offsets), unless neutral=True.
     rest "on": both lines also get the rest effect from rest_a / rest_b (params.rest_offsets).
     calib "on": the win % is calibrated (params.calibrate_win_prob); team_b's is 100 minus team_a's.
+    calib_temperature: the temperature to calibrate with (default params.calib_temperature(), the
+    live season settings'; params.calib_temperature("on") for react on, Phase 10c).
     pace_sigma: overrides the game's pace noise (default params.pace_sigma(); fit_calib.py's diagnosis).
     """
     n_sim = N_SIM
@@ -174,7 +176,7 @@ def simulate_factors(team_a, team_b, data: dict, seed=None, sigma=None,
     b_win_pct = np.sum(b_games_won)
     raw_a = (a_win_pct / n_sim) * 100   # Convert raw count to percentage
     if with_calib:
-        team_a_pct = 100 * params.calibrate_win_prob(raw_a / 100, calib)
+        team_a_pct = 100 * params.calibrate_win_prob(raw_a / 100, calib, calib_temperature)
         team_b_pct = 100 - team_a_pct
     else:
         team_a_pct, team_b_pct = raw_a, (b_win_pct / n_sim) * 100
